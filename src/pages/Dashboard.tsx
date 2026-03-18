@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { Vehicle, FuelEntry, MaintenanceRecord, Issue } from '../types'
+import type { Vehicle, FuelEntry, MaintenanceRecord, Issue } from '../types'
 
 function fmtDate(d: string) {
   return new Date(d + 'T00:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })

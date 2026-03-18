@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { FuelEntry } from '../types'
+import type { FuelEntry } from '../types'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 
 function fmtDate(d: string) {
@@ -113,7 +113,7 @@ export default function FuelLog({ vehicleId }: Props) {
               <YAxis tick={{ fill: '#5a6480', fontSize: 11 }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
               <Tooltip
                 contentStyle={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12 }}
-                formatter={(val: number) => [val.toFixed(1) + ' L/100km', 'Economy']}
+                formatter={(val) => [Number(val).toFixed(1) + ' L/100km', 'Economy']}
               />
               {avgL100 && <ReferenceLine y={+avgL100.toFixed(2)} stroke="#5a6480" strokeDasharray="4 4" label={{ value: 'avg', fill: '#5a6480', fontSize: 10 }} />}
               <Line type="monotone" dataKey="l100" stroke="#f59e0b" strokeWidth={2} dot={{ fill: '#f59e0b', r: 3 }} activeDot={{ r: 5 }} connectNulls={false} />

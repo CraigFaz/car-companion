@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './lib/supabase'
-import { Vehicle } from './types'
+import type { Vehicle } from './types'
 import Dashboard from './pages/Dashboard'
 import FuelLog from './pages/FuelLog'
 import Maintenance from './pages/Maintenance'
