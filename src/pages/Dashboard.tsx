@@ -77,7 +77,7 @@ export default function Dashboard({ vehicle }: Props) {
       </div>
 
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem' }}>
+      <div className="grid-stats">
         {statCards.map(s => (
           <div key={s.label} style={card}>
             <div style={{ color: 'var(--sub)', fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{s.label}</div>
@@ -88,7 +88,7 @@ export default function Dashboard({ vehicle }: Props) {
       </div>
 
       {/* Two column: open issues + recent fills */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+      <div className="grid-two">
         <div style={card}>
           <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.75rem' }}>
             Open Issues <span style={{ color: 'var(--sub)', fontWeight: 400 }}>({openIssues.length})</span>

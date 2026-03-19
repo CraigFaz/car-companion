@@ -90,7 +90,7 @@ export default function Maintenance({ vehicleId }: Props) {
       {/* Form */}
       {showForm && (
         <div style={card}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem', marginBottom: '0.75rem' }}>
+          <div className="grid-form-3">
             <div><label style={LABEL}>Date</label><input type="date" style={INPUT} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
             <div><label style={LABEL}>Odometer (km)</label><input type="number" style={INPUT} value={form.odometer_km} onChange={e => setForm(f => ({ ...f, odometer_km: e.target.value }))} placeholder="272500" /></div>
             <div>

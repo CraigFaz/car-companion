@@ -89,7 +89,7 @@ export default function FuelLog({ vehicleId }: Props) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem' }}>
+      <div className="grid-stats">
         {[
           { label: 'Fillups', value: entries.length.toString() },
           { label: 'Total Liters', value: totalLiters.toFixed(1) + 'L' },
@@ -136,7 +136,7 @@ export default function FuelLog({ vehicleId }: Props) {
       {/* Add form */}
       {showForm && (
         <div style={card}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem', marginBottom: '0.75rem' }}>
+          <div className="grid-form-3">
             <div><label style={LABEL}>Date</label><input type="date" style={INPUT} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
             <div><label style={LABEL}>Odometer (km)</label><input type="number" style={INPUT} value={form.odometer_km} onChange={e => setForm(f => ({ ...f, odometer_km: e.target.value }))} placeholder="272500" /></div>
             <div><label style={LABEL}>Liters</label><input type="number" step="0.001" style={INPUT} value={form.liters} onChange={e => setForm(f => ({ ...f, liters: e.target.value }))} placeholder="50.000" /></div>
@@ -152,7 +152,7 @@ export default function FuelLog({ vehicleId }: Props) {
       )}
 
       {/* Table */}
-      <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+      <div className="table-scroll" style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
