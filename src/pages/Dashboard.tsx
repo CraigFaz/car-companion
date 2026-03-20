@@ -89,7 +89,7 @@ export default function Dashboard({ vehicle }: Props) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       {/* Vehicle card */}
       <div style={{ ...card }}>
-        <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: collapsed.vehicle ? 0 : '0.75rem' }}>
           <div>
             <div style={{ fontFamily: 'Barlow Condensed, sans-serif', fontWeight: 700, fontSize: '1.75rem', letterSpacing: '0.02em' }}>
               {vehicle.name}
@@ -98,16 +98,18 @@ export default function Dashboard({ vehicle }: Props) {
               {vehicle.year} {vehicle.make} {vehicle.model} · {vehicle.trim}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap', marginLeft: 'auto', alignItems: 'center' }}>
-            {!collapsed.vehicle && (([['Odometer', vehicle.odometer_km.toLocaleString() + ' km'], ['Plate', vehicle.plate || '—'], ['VIN', vehicle.vin || '—']] as [string,string][]).map(([label, val]) => (
+          <MinimizeBtn minimized={collapsed.vehicle} onToggle={() => toggle('vehicle')} />
+        </div>
+        {!collapsed.vehicle && (
+          <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
+            {([['Odometer', vehicle.odometer_km.toLocaleString() + ' km'], ['Plate', vehicle.plate || '—'], ['VIN', vehicle.vin || '—']] as [string,string][]).map(([label, val]) => (
               <div key={label}>
                 <div style={{ color: 'var(--sub)', fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{label}</div>
                 <div style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.82rem', marginTop: 3 }}>{val}</div>
               </div>
-            )))}
-            <MinimizeBtn minimized={collapsed.vehicle} onToggle={() => toggle('vehicle')} />
+            ))}
           </div>
-        </div>
+        )}
       </div>
 
       {/* Stats */}
