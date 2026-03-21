@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { scanFuelReceipt } from '../lib/ocr'
+import { scanFuelReceipt, scanOdometer } from '../lib/ocr'
 import type { FuelEntry } from '../types'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 
@@ -90,7 +90,11 @@ export default function FuelLog({ vehicleId }: Props) {
   const [scanning, setScanning] = useState(false)
   const [scanPct, setScanPct] = useState(0)
   const [scanNote, setScanNote] = useState('')
+  const [ocrScanning, setOcrScanning] = useState(false)
+  const [ocrPct, setOcrPct] = useState(0)
+  const [ocrNote, setOcrNote] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+  const odoRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { load() }, [vehicleId])
 
@@ -144,6 +148,7 @@ export default function FuelLog({ vehicleId }: Props) {
     setForm(EMPTY_FORM)
     setLastTwo([])
     setScanNote('')
+    setOcrNote('')
     setShowForm(true)
   }
 
@@ -151,6 +156,7 @@ export default function FuelLog({ vehicleId }: Props) {
     setShowForm(false)
     setLastTwo([])
     setScanNote('')
+    setOcrNote('')
   }
 
   async function handleScanFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -185,6 +191,27 @@ export default function FuelLog({ vehicleId }: Props) {
       setScanNote('Scan failed — enter manually')
     }
     setScanning(false)
+  }
+
+  async function handleOdoFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setOcrScanning(true)
+    setOcrPct(0)
+    setOcrNote('')
+    try {
+      const result = await scanOdometer(file, setOcrPct)
+      if (result.odometer_km) {
+        setForm(f => ({ ...f, odometer_km: result.odometer_km }))
+        setOcrNote(`Read: ${Number(result.odometer_km).toLocaleString()} km — correct if needed`)
+      } else {
+        setOcrNote('No odometer reading found — enter manually')
+      }
+    } catch {
+      setOcrNote('Scan failed — enter manually')
+    }
+    setOcrScanning(false)
   }
 
   async function handleSave() {
@@ -297,23 +324,44 @@ export default function FuelLog({ vehicleId }: Props) {
       {showForm && (
         <div style={card}>
 
-          {/* Scan receipt */}
-          <div style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleScanFile} />
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              disabled={scanning}
-              style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 14px', color: scanning ? 'var(--sub)' : 'var(--text)', cursor: scanning ? 'not-allowed' : 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
-            >
-              <span>📷</span>
-              {scanning ? `Scanning… ${scanPct}%` : 'Scan Receipt'}
-            </button>
-            {scanNote && (
-              <span style={{ fontSize: '0.75rem', color: scanNote.startsWith('Filled') ? 'var(--green)' : 'var(--sub)' }}>
-                {scanNote}
-              </span>
-            )}
+          {/* Scan buttons */}
+          <div style={{ marginBottom: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+              {/* Receipt scanner — no capture attr so user can pick camera OR existing image */}
+              <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleScanFile} />
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={scanning}
+                style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 14px', color: scanning ? 'var(--sub)' : 'var(--text)', cursor: scanning ? 'not-allowed' : 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+              >
+                <span>🧾</span>
+                {scanning ? `Scanning… ${scanPct}%` : 'Scan Receipt'}
+              </button>
+              {scanNote && (
+                <span style={{ fontSize: '0.75rem', color: scanNote.startsWith('Filled') ? 'var(--green)' : 'var(--sub)' }}>
+                  {scanNote}
+                </span>
+              )}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+              {/* Odometer scanner */}
+              <input ref={odoRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleOdoFile} />
+              <button
+                type="button"
+                onClick={() => odoRef.current?.click()}
+                disabled={ocrScanning}
+                style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 14px', color: ocrScanning ? 'var(--sub)' : 'var(--text)', cursor: ocrScanning ? 'not-allowed' : 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+              >
+                <span>🔢</span>
+                {ocrScanning ? `Scanning… ${ocrPct}%` : 'Scan Odometer'}
+              </button>
+              {ocrNote && (
+                <span style={{ fontSize: '0.75rem', color: ocrNote.startsWith('Read') ? 'var(--green)' : 'var(--sub)' }}>
+                  {ocrNote}
+                </span>
+              )}
+            </div>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>

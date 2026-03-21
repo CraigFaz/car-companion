@@ -9,28 +9,53 @@ export interface OcrResult {
   raw: string
 }
 
-/** Run Tesseract on an image File and return parsed fuel receipt fields */
-export async function scanFuelReceipt(
-  file: File,
-  onProgress?: (pct: number) => void,
-): Promise<OcrResult> {
-  const { data } = await Tesseract.recognize(file, 'eng', {
+export interface OdometerResult {
+  odometer_km: string
+  raw: string
+}
+
+function runOcr(file: File, onProgress?: (pct: number) => void) {
+  return Tesseract.recognize(file, 'eng', {
     logger: (m) => {
       if (m.status === 'recognizing text' && onProgress) {
         onProgress(Math.round(m.progress * 100))
       }
     },
   })
+}
 
+/** Run Tesseract on an image File and return parsed fuel receipt fields */
+export async function scanFuelReceipt(
+  file: File,
+  onProgress?: (pct: number) => void,
+): Promise<OcrResult> {
+  const { data } = await runOcr(file, onProgress)
   const raw = data.text
-  return { ...parse(raw), raw }
+  return { ...parseReceipt(raw), raw }
+}
+
+/**
+ * Run Tesseract on a dashboard/odometer photo and return the odometer reading.
+ *
+ * Strategy:
+ * 1. Prefer numbers immediately after an ODO/ODOMETER label.
+ * 2. Otherwise pick the largest 5–6 digit number in a plausible km range (10 000–999 999).
+ * 3. Strip commas/spaces from digit groups (e.g. "272 500" or "272,500").
+ */
+export async function scanOdometer(
+  file: File,
+  onProgress?: (pct: number) => void,
+): Promise<OdometerResult> {
+  const { data } = await runOcr(file, onProgress)
+  const raw = data.text
+  return { odometer_km: parseOdometer(raw), raw }
 }
 
 // ---------------------------------------------------------------------------
-// Parsing helpers
+// Receipt parsing
 // ---------------------------------------------------------------------------
 
-function parse(text: string): Omit<OcrResult, 'raw'> {
+function parseReceipt(text: string): Omit<OcrResult, 'raw'> {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
   const upper = text.toUpperCase()
 
@@ -131,4 +156,34 @@ function parseStation(lines: string[]): string {
     if (line.length >= 3 && !skip.test(line)) return line
   }
   return ''
+}
+
+// ---------------------------------------------------------------------------
+// Odometer parsing
+// ---------------------------------------------------------------------------
+
+function parseOdometer(text: string): string {
+  const upper = text.toUpperCase()
+
+  // 1. Prefer a number right after an ODO / ODOMETER label
+  const labeled = upper.match(/(?:ODO(?:METER)?|MILEAGE|KM)\s*[:\s]\s*([\d][,\s\d]{3,8})/)
+  if (labeled) {
+    const v = labeled[1].replace(/[,\s]/g, '')
+    const n = parseInt(v, 10)
+    if (n >= 10_000 && n <= 999_999) return String(n)
+  }
+
+  // 2. Collect all plausible 5–6 digit numbers (with optional comma/space separators)
+  //    e.g. "272,500" "272 500" "272500"
+  const normalised = text.replace(/,/g, '').replace(/(\d)\s(\d)/g, '$1$2')
+  const candidates: number[] = []
+  for (const m of normalised.matchAll(/\b(\d{5,6})\b/g)) {
+    const n = parseInt(m[1], 10)
+    if (n >= 10_000 && n <= 999_999) candidates.push(n)
+  }
+
+  if (candidates.length === 0) return ''
+
+  // Pick the largest — dashboard readings dominate trip meters and other small numbers
+  return String(Math.max(...candidates))
 }
