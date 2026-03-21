@@ -5,17 +5,27 @@ import Dashboard from './pages/Dashboard'
 import FuelLog from './pages/FuelLog'
 import Maintenance from './pages/Maintenance'
 import Issues from './pages/Issues'
+import OilTopups from './pages/OilTopups'
 
-type Tab = 'dashboard' | 'fuel' | 'maintenance' | 'issues'
+type Tab = 'dashboard' | 'fuel' | 'maintenance' | 'issues' | 'oil'
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'dashboard',   label: 'Dashboard',   icon: '⊞' },
   { id: 'fuel',        label: 'Fuel',         icon: '⛽' },
   { id: 'maintenance', label: 'Maintenance',  icon: '🔧' },
   { id: 'issues',      label: 'Issues',       icon: '⚠' },
+  { id: 'oil',         label: 'Oil',          icon: '🛢' },
 ]
 
 const CHANGELOG = [
+  {
+    version: 'v1.5',
+    date: '2026-03-21',
+    notes: [
+      'New Oil tab: log engine oil top-ups with date, amount (L), odometer, and brand',
+      'Shows total litres added across all top-ups',
+    ],
+  },
   {
     version: 'v1.4',
     date: '2026-03-21',
@@ -124,6 +134,7 @@ export default function App() {
         {vehicle && tab === 'fuel'        && <FuelLog vehicleId={vehicle.id} />}
         {vehicle && tab === 'maintenance' && <Maintenance vehicleId={vehicle.id} />}
         {vehicle && tab === 'issues'      && <Issues vehicleId={vehicle.id} />}
+        {vehicle && tab === 'oil'         && <OilTopups vehicleId={vehicle.id} />}
       </main>
 
       {/* Mobile bottom nav */}
