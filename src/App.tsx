@@ -19,6 +19,15 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v1.6',
+    date: '2026-03-21',
+    notes: [
+      'Fuel form: Scan Receipt button — photo or image upload runs Tesseract.js OCR on the receipt',
+      'Auto-fills litres, price/L, total, station name, and date from the scanned text',
+      'Fields are pre-filled for review; any-two-of-three math still applies after scanning',
+    ],
+  },
+  {
     version: 'v1.5',
     date: '2026-03-21',
     notes: [
