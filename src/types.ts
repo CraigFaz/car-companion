@@ -78,6 +78,16 @@ export interface OilTopup {
   notes: string | null
 }
 
+export interface ScanPrefill {
+  date?: string
+  station?: string
+  grade?: string
+  liters?: string
+  price_per_liter?: string
+  total_cost?: string
+  odometer_km?: string
+}
+
 export interface Issue {
   id: string
   vehicle_id: string
