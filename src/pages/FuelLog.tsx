@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { scanFuelReceipt, scanOdometer } from '../lib/ocr'
+import type { OcrResult } from '../lib/ocr'
 import type { FuelEntry } from '../types'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 
@@ -93,6 +94,8 @@ export default function FuelLog({ vehicleId }: Props) {
   const [ocrScanning, setOcrScanning] = useState(false)
   const [ocrPct, setOcrPct] = useState(0)
   const [ocrNote, setOcrNote] = useState('')
+  const [ocrData, setOcrData] = useState<OcrResult | null>(null)
+  const [showRaw, setShowRaw] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const odoRef = useRef<HTMLInputElement>(null)
 
@@ -149,6 +152,8 @@ export default function FuelLog({ vehicleId }: Props) {
     setLastTwo([])
     setScanNote('')
     setOcrNote('')
+    setOcrData(null)
+    setShowRaw(false)
     setShowForm(true)
   }
 
@@ -157,6 +162,8 @@ export default function FuelLog({ vehicleId }: Props) {
     setLastTwo([])
     setScanNote('')
     setOcrNote('')
+    setOcrData(null)
+    setShowRaw(false)
   }
 
   async function handleScanFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -166,9 +173,11 @@ export default function FuelLog({ vehicleId }: Props) {
     setScanning(true)
     setScanPct(0)
     setScanNote('')
+    setOcrData(null)
+    setShowRaw(false)
     try {
       const result = await scanFuelReceipt(file, setScanPct)
-      // Determine which calc fields were filled so any-two-of-three stays correct
+      setOcrData(result)
       const filled: CalcField[] = (['liters', 'price_per_liter', 'total_cost'] as CalcField[]).filter(f => !!result[f])
       const newLastTwo = filled.slice(-2) as CalcField[]
       setLastTwo(newLastTwo)
@@ -179,12 +188,14 @@ export default function FuelLog({ vehicleId }: Props) {
         price_per_liter: result.price_per_liter || f.price_per_liter,
         total_cost: result.total_cost || f.total_cost,
         station: result.station || f.station,
+        grade: result.grade || f.grade,
       }))
       const found = [
         result.liters && 'litres',
         result.price_per_liter && 'price/L',
         result.total_cost && 'total',
         result.station && 'station',
+        result.grade && 'grade',
       ].filter(Boolean)
       setScanNote(found.length ? `Filled: ${found.join(', ')} — review and correct as needed` : 'No fields recognised — enter manually')
     } catch {
@@ -230,6 +241,8 @@ export default function FuelLog({ vehicleId }: Props) {
       total_cost: t,
       station: form.station || null,
       notes: form.notes || null,
+      ocr_raw: ocrData?.raw ?? null,
+      ocr_meta: ocrData ? (Object.keys(ocrData.meta).length > 0 ? ocrData.meta as unknown as Record<string, unknown> : null) : null,
     })
     setForm(EMPTY_FORM)
     setLastTwo([])
@@ -363,6 +376,30 @@ export default function FuelLog({ vehicleId }: Props) {
               )}
             </div>
           </div>
+
+          {/* Raw OCR text — collapsible, always stored even if not shown */}
+          {ocrData && (
+            <div style={{ marginBottom: '0.75rem' }}>
+              <button
+                type="button"
+                onClick={() => setShowRaw(r => !r)}
+                style={{ background: 'none', border: 'none', color: 'var(--sub)', fontSize: '0.72rem', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+              >
+                <span style={{ fontSize: '0.6rem' }}>{showRaw ? '▼' : '▶'}</span>
+                Raw OCR text
+                {Object.keys(ocrData.meta).length > 0 && (
+                  <span style={{ marginLeft: 6, color: 'var(--blue)' }}>
+                    +{Object.keys(ocrData.meta).length} extra fields stored
+                  </span>
+                )}
+              </button>
+              {showRaw && (
+                <pre style={{ marginTop: 6, background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 6, padding: '0.6rem 0.75rem', fontSize: '0.7rem', color: 'var(--sub)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 200, overflowY: 'auto' }}>
+                  {ocrData.raw || '(empty)'}
+                </pre>
+              )}
+            </div>
+          )}
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
             <div>

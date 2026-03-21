@@ -19,6 +19,17 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v1.7',
+    date: '2026-03-21',
+    notes: [
+      'OCR handles multiple receipt formats: Esso, Petro-Canada, Shell, Costco, generic Canadian stations',
+      'Auto-detects fuel grade from receipt text (EREG → Regular 87, PREM → Premium 91, etc.)',
+      'All raw OCR text saved to database — viewable via collapsible toggle in the add form',
+      'Extra receipt fields (pump #, transaction #, HST #, tax amounts, address, time) saved to ocr_meta for future use',
+      'DB migration: added ocr_raw (text) and ocr_meta (jsonb) columns to fuel_entries',
+    ],
+  },
+  {
     version: 'v1.6',
     date: '2026-03-21',
     notes: [
