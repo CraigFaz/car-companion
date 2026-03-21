@@ -21,6 +21,17 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v2.0',
+    date: '2026-03-21',
+    notes: [
+      'Scan tab: two-photo session — upload receipt first, then optionally add an odometer photo',
+      'Odometer photo scanned separately with a dedicated prompt, km value merged into the combined result',
+      'Odometer hint shown in fields panel when km is missing from receipt, prompting user to add photo',
+      'Receipt and odometer images shown side by side; "Use These Values" sends the combined data to the fuel form',
+      '"Replace photo" link on odometer panel to re-scan if needed',
+    ],
+  },
+  {
     version: 'v1.9',
     date: '2026-03-21',
     notes: [
