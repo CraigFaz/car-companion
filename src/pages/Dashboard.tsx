@@ -1,9 +1,15 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import type { Vehicle, FuelEntry, RepairEntry, Issue } from '../types'
+import type { Vehicle, FuelEntry, RepairEntry, RepairItem, Issue } from '../types'
 
 function fmtDate(d: string) {
   return new Date(d + 'T00:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function addMonths(date: Date, months: number): Date {
+  const d = new Date(date)
+  d.setMonth(d.getMonth() + months)
+  return d
 }
 
 function computeL100Map(entries: FuelEntry[]): Map<string, number | null> {
@@ -18,6 +24,54 @@ function computeL100Map(entries: FuelEntry[]): Map<string, number | null> {
   return map
 }
 
+interface ServiceAlert {
+  label: string
+  nextKm: number | null
+  nextDate: Date | null
+  kmRemaining: number | null
+  daysRemaining: number | null
+  status: 'overdue' | 'soon' | 'ok'
+}
+
+function computeAlerts(repairs: RepairEntry[], currentOdo: number): ServiceAlert[] {
+  const today = new Date()
+
+  // Flatten all items with intervals, tag with entry date/odo
+  const candidates = repairs.flatMap(e =>
+    (e.repair_items || [])
+      .filter(i => i.interval_label && i.interval_label.trim() && (i.interval_km || i.interval_months))
+      .map(i => ({ item: i, date: e.date, odo: e.odometer_km }))
+  )
+
+  // Keep only the most recent entry per interval_label
+  const latest = new Map<string, { item: RepairItem; date: string; odo: number | null }>()
+  for (const c of candidates) {
+    const existing = latest.get(c.item.interval_label!)
+    if (!existing || c.date > existing.date) {
+      latest.set(c.item.interval_label!, c)
+    }
+  }
+
+  return [...latest.values()].map(({ item, date, odo }) => {
+    const nextKm = item.interval_km && odo ? odo + item.interval_km : null
+    const nextDate = item.interval_months ? addMonths(new Date(date + 'T00:00:00'), item.interval_months) : null
+    const kmRemaining = nextKm !== null ? nextKm - currentOdo : null
+    const daysRemaining = nextDate ? Math.floor((nextDate.getTime() - today.getTime()) / 86400000) : null
+
+    let status: ServiceAlert['status'] = 'ok'
+    if ((kmRemaining !== null && kmRemaining <= 0) || (daysRemaining !== null && daysRemaining <= 0)) {
+      status = 'overdue'
+    } else if ((kmRemaining !== null && kmRemaining <= 500) || (daysRemaining !== null && daysRemaining <= 30)) {
+      status = 'soon'
+    }
+
+    return { label: item.interval_label!, nextKm, nextDate, kmRemaining, daysRemaining, status }
+  }).sort((a, b) => {
+    const rank = { overdue: 0, soon: 1, ok: 2 }
+    return rank[a.status] - rank[b.status]
+  })
+}
+
 const SEVERITY_DOT: Record<string, string> = {
   Urgent: 'var(--red)',
   Concerning: 'var(--amber)',
@@ -30,16 +84,9 @@ function MinimizeBtn({ minimized, onToggle }: { minimized: boolean; onToggle: ()
       onClick={onToggle}
       title={minimized ? 'Expand' : 'Minimize'}
       style={{
-        background: 'none',
-        border: 'none',
-        cursor: 'pointer',
-        color: 'var(--sub)',
-        padding: '0 2px',
-        lineHeight: 1,
-        fontSize: '0.75rem',
-        display: 'flex',
-        alignItems: 'center',
-        transition: 'color 0.15s',
+        background: 'none', border: 'none', cursor: 'pointer', color: 'var(--sub)',
+        padding: '0 2px', lineHeight: 1, fontSize: '0.75rem', display: 'flex',
+        alignItems: 'center', transition: 'color 0.15s',
       }}
       onMouseEnter={e => (e.currentTarget.style.color = 'var(--fg)')}
       onMouseLeave={e => (e.currentTarget.style.color = 'var(--sub)')}
@@ -58,13 +105,13 @@ export default function Dashboard({ vehicle }: Props) {
   const [fuel, setFuel] = useState<FuelEntry[]>([])
   const [repairs, setRepairs] = useState<RepairEntry[]>([])
   const [issues, setIssues] = useState<Issue[]>([])
-  const [collapsed, setCollapsed] = useState({ vehicle: false, stats: false, issues: false, fillups: false })
+  const [collapsed, setCollapsed] = useState({ vehicle: false, stats: false, alerts: false, issues: false, fillups: false })
 
   const toggle = (key: keyof typeof collapsed) => setCollapsed(c => ({ ...c, [key]: !c[key] }))
 
   useEffect(() => {
     supabase.from('fuel_entries').select('*').eq('vehicle_id', vehicle.id).order('date', { ascending: false }).then(({ data }) => { if (data) setFuel(data) })
-    supabase.from('repair_entries').select('*').eq('vehicle_id', vehicle.id).order('date', { ascending: false }).then(({ data }) => { if (data) setRepairs(data as RepairEntry[]) })
+    supabase.from('repair_entries').select('*, repair_items(*)').eq('vehicle_id', vehicle.id).order('date', { ascending: false }).then(({ data }) => { if (data) setRepairs(data as RepairEntry[]) })
     supabase.from('issues').select('*').eq('vehicle_id', vehicle.id).order('date', { ascending: false }).then(({ data }) => { if (data) setIssues(data) })
   }, [vehicle.id])
 
@@ -76,6 +123,9 @@ export default function Dashboard({ vehicle }: Props) {
   const totalMaint = repairs.reduce((s, r) => s + (r.total_cost || 0), 0)
   const lastFill = fuel[0]
   const openIssues = issues.filter(i => i.status === 'Open')
+
+  const alerts = computeAlerts(repairs, vehicle.odometer_km)
+  const actionableAlerts = alerts.filter(a => a.status !== 'ok')
 
   const statCards = [
     { label: 'Fuel Spent', value: '$' + totalFuel.toFixed(2), sub: `${fuel.length} fillups` },
@@ -131,6 +181,54 @@ export default function Dashboard({ vehicle }: Props) {
           </div>
         )}
       </div>
+
+      {/* Service Alerts */}
+      {actionableAlerts.length > 0 && (
+        <div style={{ ...card, border: `1px solid ${actionableAlerts[0].status === 'overdue' ? 'var(--red)' : 'var(--amber)'}44` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: collapsed.alerts ? 0 : '0.75rem' }}>
+            <div style={{ fontWeight: 600, fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              Service Due
+              <span style={{
+                background: actionableAlerts[0].status === 'overdue' ? 'var(--red)' : 'var(--amber)',
+                color: '#000', borderRadius: 10, padding: '1px 7px', fontSize: '0.65rem', fontWeight: 700,
+              }}>
+                {actionableAlerts.length}
+              </span>
+            </div>
+            <MinimizeBtn minimized={collapsed.alerts} onToggle={() => toggle('alerts')} />
+          </div>
+          {!collapsed.alerts && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {actionableAlerts.map(alert => {
+                const color = alert.status === 'overdue' ? 'var(--red)' : 'var(--amber)'
+                const parts: string[] = []
+                if (alert.kmRemaining !== null) {
+                  if (alert.kmRemaining <= 0) parts.push(`${Math.abs(alert.kmRemaining).toLocaleString()} km overdue`)
+                  else parts.push(`${alert.kmRemaining.toLocaleString()} km remaining`)
+                }
+                if (alert.daysRemaining !== null) {
+                  if (alert.daysRemaining <= 0) parts.push(`${Math.abs(alert.daysRemaining)}d overdue`)
+                  else parts.push(`${alert.daysRemaining}d remaining`)
+                }
+                return (
+                  <div key={alert.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0.75rem', background: color + '12', borderRadius: 7, borderLeft: `3px solid ${color}` }}>
+                    <div>
+                      <div style={{ fontSize: '0.875rem', fontWeight: 600 }}>{alert.label}</div>
+                      <div style={{ color: 'var(--sub)', fontSize: '0.72rem', marginTop: 2 }}>
+                        {parts.join(' · ')}
+                        {alert.nextKm && <span> · due at {alert.nextKm.toLocaleString()} km</span>}
+                      </div>
+                    </div>
+                    <span style={{ color, fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      {alert.status === 'overdue' ? 'Overdue' : 'Soon'}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Two column: open issues + recent fills */}
       <div className="grid-two">

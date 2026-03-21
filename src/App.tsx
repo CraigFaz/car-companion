@@ -17,6 +17,15 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v1.4',
+    date: '2026-03-21',
+    notes: [
+      'Dashboard: Service Due alerts card — shows overdue and upcoming maintenance based on repair item intervals',
+      'Oil Change flagged as due soon (389 km remaining)',
+      'Alert card border colour reflects urgency (amber = soon, red = overdue)',
+    ],
+  },
+  {
     version: 'v1.3',
     date: '2026-03-21',
     notes: [

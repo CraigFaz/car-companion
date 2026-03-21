@@ -16,7 +16,7 @@
 
 ## Dev Branch
 
-All work goes on `claude/next-steps-q1X53`. Push to that branch. Never push directly to `main`.
+Push directly to `main`. No PRs, no feature branches — changes deploy to production immediately via Vercel.
 
 ## Key Files
 
@@ -32,18 +32,18 @@ All work goes on `claude/next-steps-q1X53`. Push to that branch. Never push dire
 | `docs/craig-fusion-data-v3.json` | Craig's historical data — 16 fillups, 3 repairs, 5 issues |
 | `docs/car-companion-handoff.docx` | Full design spec from prototype handoff |
 
-## What's Been Built (as of v1.1)
+## What's Been Built (as of v1.3)
 
 - React + Vite + TypeScript + Tailwind + Recharts + Supabase
 - Dashboard: stats cards, L/100km chart, recent fillups, open issues
 - Fuel log: list, chart, add form with any-two-of-three math, grade field, flagged entries
-- Maintenance: flat records (needs rebuild as line items — see roadmap)
+- Maintenance: repair visits with line items, type badges, warranty, service interval reminders
 - Issues: severity colour coding, open/resolved status
 
 ## Roadmap (next priorities)
 
-1. **Import Craig's data** — `docs/craig-fusion-data-v3.json` into Supabase (one-time script)
-2. **Rebuild Repairs tab** — `repair_entries` + `repair_items` with interval tracking (P2)
-3. **Maintenance alerts** on Dashboard from line item intervals (P2)
+1. **Maintenance alerts** on Dashboard from repair_items interval tracking (P2)
+2. **Oil top-up log** — `oil_topups` table + tab or section (P3)
+3. **OCR receipt scanning** — Tesseract.js for fuel receipts (P3)
 
 See `docs/car-companion-handoff.docx` for full spec, schema, UI conventions, and lessons learned.
