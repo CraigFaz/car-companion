@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { scanFuelReceipt } from '../lib/ocr'
 import type { FuelEntry } from '../types'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 
@@ -86,6 +87,10 @@ export default function FuelLog({ vehicleId }: Props) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   // Tracks the last two calc fields the user touched — the third is always derived
   const [lastTwo, setLastTwo] = useState<CalcField[]>([])
+  const [scanning, setScanning] = useState(false)
+  const [scanPct, setScanPct] = useState(0)
+  const [scanNote, setScanNote] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { load() }, [vehicleId])
 
@@ -138,12 +143,48 @@ export default function FuelLog({ vehicleId }: Props) {
   function openForm() {
     setForm(EMPTY_FORM)
     setLastTwo([])
+    setScanNote('')
     setShowForm(true)
   }
 
   function closeForm() {
     setShowForm(false)
     setLastTwo([])
+    setScanNote('')
+  }
+
+  async function handleScanFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setScanning(true)
+    setScanPct(0)
+    setScanNote('')
+    try {
+      const result = await scanFuelReceipt(file, setScanPct)
+      // Determine which calc fields were filled so any-two-of-three stays correct
+      const filled: CalcField[] = (['liters', 'price_per_liter', 'total_cost'] as CalcField[]).filter(f => !!result[f])
+      const newLastTwo = filled.slice(-2) as CalcField[]
+      setLastTwo(newLastTwo)
+      setForm(f => ({
+        ...f,
+        date: result.date || f.date,
+        liters: result.liters || f.liters,
+        price_per_liter: result.price_per_liter || f.price_per_liter,
+        total_cost: result.total_cost || f.total_cost,
+        station: result.station || f.station,
+      }))
+      const found = [
+        result.liters && 'litres',
+        result.price_per_liter && 'price/L',
+        result.total_cost && 'total',
+        result.station && 'station',
+      ].filter(Boolean)
+      setScanNote(found.length ? `Filled: ${found.join(', ')} — review and correct as needed` : 'No fields recognised — enter manually')
+    } catch {
+      setScanNote('Scan failed — enter manually')
+    }
+    setScanning(false)
   }
 
   async function handleSave() {
@@ -255,6 +296,26 @@ export default function FuelLog({ vehicleId }: Props) {
       {/* Add form */}
       {showForm && (
         <div style={card}>
+
+          {/* Scan receipt */}
+          <div style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleScanFile} />
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={scanning}
+              style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 14px', color: scanning ? 'var(--sub)' : 'var(--text)', cursor: scanning ? 'not-allowed' : 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+            >
+              <span>📷</span>
+              {scanning ? `Scanning… ${scanPct}%` : 'Scan Receipt'}
+            </button>
+            {scanNote && (
+              <span style={{ fontSize: '0.75rem', color: scanNote.startsWith('Filled') ? 'var(--green)' : 'var(--sub)' }}>
+                {scanNote}
+              </span>
+            )}
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
             <div>
               <label style={LABEL}>Date</label>
