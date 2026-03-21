@@ -21,6 +21,15 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v2.1',
+    date: '2026-03-21',
+    notes: [
+      'Scan tab: either receipt or odometer photo can now be uploaded first — no forced order',
+      'Both upload zones are active from the start; uploading either one opens the full scan layout',
+      'Receipt card in expanded view shows an upload zone when receipt hasn\'t been added yet, mirroring the odometer panel',
+    ],
+  },
+  {
     version: 'v2.0',
     date: '2026-03-21',
     notes: [

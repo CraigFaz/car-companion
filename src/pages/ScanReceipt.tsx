@@ -199,23 +199,22 @@ export default function ScanReceipt({ onUseScan }: Props) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
       {/* ── Step 1: Nothing uploaded ── */}
-      {!receiptUrl && (
+      {!receiptUrl && !odoUrl && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
           <div style={{ color: 'var(--sub)', fontSize: '0.8rem' }}>
-            Upload your receipt first, then optionally add an odometer photo.
+            Upload a receipt, odometer photo, or both — in any order.
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-            <div onClick={() => receiptRef.current?.click()} style={{ cursor: 'pointer' }}>
-              <UploadZone label="Receipt Photo" hint="Date, station, litres, price, total" icon="🧾" onClick={() => {}} />
-            </div>
-            <UploadZone label="Odometer Photo" hint="Add after receipt scan" icon="🔢" onClick={() => {}} disabled />
+            <UploadZone label="Receipt Photo" hint="Date, station, litres, price, total" icon="🧾" onClick={() => receiptRef.current?.click()} />
+            <UploadZone label="Odometer Photo" hint="Mileage reading" icon="🔢" onClick={() => odoRef.current?.click()} />
           </div>
           <input ref={receiptRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display: 'none' }} onChange={handleReceiptFile} />
+          <input ref={odoRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display: 'none' }} onChange={handleOdoFile} />
         </div>
       )}
 
-      {/* ── Step 2+: Receipt uploaded ── */}
-      {receiptUrl && (
+      {/* ── Step 2+: At least one image uploaded ── */}
+      {(receiptUrl || odoUrl) && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
           {/* Scanning banners */}
@@ -240,8 +239,32 @@ export default function ScanReceipt({ onUseScan }: Props) {
               {/* Receipt image */}
               <div style={card}>
                 <div style={{ fontSize: '0.65rem', color: 'var(--sub)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>Receipt</div>
-                <img src={receiptUrl} alt="Receipt" style={{ width: '100%', borderRadius: 6, display: 'block', maxHeight: 400, objectFit: 'contain' }} />
-                {receiptError && <div style={{ marginTop: '0.5rem', color: '#f43f5e', fontSize: '0.8rem' }}>Scan failed: {receiptError}</div>}
+                {!receiptUrl ? (
+                  <>
+                    <UploadZone
+                      label="Add Receipt Photo"
+                      hint="Date, station, litres, price, total"
+                      icon="🧾"
+                      onClick={() => receiptRef.current?.click()}
+                      disabled={receiptScanning}
+                    />
+                    <input ref={receiptRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display: 'none' }} onChange={handleReceiptFile} />
+                  </>
+                ) : (
+                  <>
+                    <img src={receiptUrl} alt="Receipt" style={{ width: '100%', borderRadius: 6, display: 'block', maxHeight: 400, objectFit: 'contain' }} />
+                    {receiptError && <div style={{ marginTop: '0.5rem', color: '#f43f5e', fontSize: '0.8rem' }}>Scan failed: {receiptError}</div>}
+                    {!receiptScanning && (
+                      <button
+                        onClick={() => { if (receiptUrl) URL.revokeObjectURL(receiptUrl); setReceiptUrl(null); setReceiptResult(null); setReceiptError(null); setTimeout(() => receiptRef.current?.click(), 50) }}
+                        style={{ marginTop: '0.5rem', background: 'none', border: 'none', color: 'var(--sub)', fontSize: '0.75rem', cursor: 'pointer', padding: 0 }}
+                      >
+                        ↺ Replace photo
+                      </button>
+                    )}
+                    <input ref={receiptRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display: 'none' }} onChange={handleReceiptFile} />
+                  </>
+                )}
               </div>
 
               {/* Odometer zone — always shown once receipt is uploaded */}
