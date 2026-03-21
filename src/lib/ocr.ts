@@ -73,58 +73,81 @@ function parseReceipt(text: string): Omit<OcrResult, 'raw'> {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
   const upper = text.toUpperCase()
 
+  // Try to pull litres + price from the Esso-style combined line first:
+  //   "58.317L AT $1.649/L"
+  const combo = parseComboLine(upper)
+
   return {
-    liters: parseVolume(upper),
-    price_per_liter: parsePricePerLiter(upper),
+    liters: combo.liters || parseVolume(upper),
+    price_per_liter: combo.price_per_liter || parsePricePerLiter(upper),
     total_cost: parseTotalCost(upper),
     date: parseDate(lines),
     station: parseStation(lines),
   }
 }
 
+/**
+ * Esso (and many Canadian pumps) print one line like:
+ *   58.317L AT $1.649/L
+ * Pull both values at once so a single clear line fills two fields.
+ */
+function parseComboLine(upper: string): { liters: string; price_per_liter: string } {
+  const m = upper.match(/(\d{1,3}\.\d{3})L?\s+AT\s+\$?(\d{1,3}\.\d{3})\/L/)
+  if (m) return { liters: m[1], price_per_liter: m[2] }
+  return { liters: '', price_per_liter: '' }
+}
+
 /** Matches patterns like:  47.832L  |  47.832 L  |  VOLUME 47.832  |  LITRES 47.832 */
-function parseVolume(text: string): string {
+function parseVolume(upper: string): string {
   const patterns = [
     /(\d{1,3}\.\d{3})\s*(?:LITRES?|LIT|L\b)/,
     /(?:VOLUME|VOL|QTY|LITRES?)\s*:?\s*(\d{1,3}\.\d{1,3})/,
   ]
   for (const p of patterns) {
-    const m = text.match(p)
+    const m = upper.match(p)
     if (m) return m[1]
   }
   return ''
 }
 
 /**
- * Matches patterns like:  1.499/L  |  149.9¢/L  |  PRICE/L 1.499  |  UNIT PRICE 1.499
+ * Matches patterns like:  1.499/L  |  149.9¢/L  |  UNIT PRICE 1.499
  * Canadian pumps sometimes print cents (e.g. 149.9) — convert if > 10.
  */
-function parsePricePerLiter(text: string): string {
+function parsePricePerLiter(upper: string): string {
   const patterns = [
-    /(\d{1,3}\.\d{1,3})\s*[¢C]?\s*\/\s*L/,
+    /AT\s+\$?(\d{1,3}\.\d{3})\/L/,                                           // "AT $1.649/L"
+    /(\d{1,3}\.\d{3})\/L/,                                                    // bare "1.649/L"
     /(?:UNIT\s*PRICE|PRICE\s*\/\s*L|PER\s*LITRE?)\s*:?\s*\$?\s*(\d{1,3}\.\d{1,3})/,
     /FUEL\s+PRICE\s*:?\s*\$?\s*(\d{1,3}\.\d{1,3})/,
   ]
   for (const p of patterns) {
-    const m = text.match(p)
+    const m = upper.match(p)
     if (m) {
       let val = parseFloat(m[1])
-      // If value looks like cents (e.g. 149.9), convert to dollars
-      if (val > 10) val = val / 100
+      if (val > 10) val = val / 100 // cents → dollars
       return val.toFixed(3)
     }
   }
   return ''
 }
 
-/** Matches patterns like:  TOTAL $74.95  |  TOTAL: 74.95  |  AMOUNT DUE 74.95 */
-function parseTotalCost(text: string): string {
+/**
+ * Matches patterns like:
+ *   TOTAL : CAD$ 96.16   (Esso Canada)
+ *   TOTAL $74.95
+ *   AMOUNT DUE 74.95
+ */
+function parseTotalCost(upper: string): string {
   const patterns = [
-    /(?:TOTAL|AMOUNT\s*DUE|SALE\s*TOTAL|TRANSACTION\s*TOTAL)\s*:?\s*\$?\s*(\d{1,4}\.\d{2})/,
+    // Handle optional currency code (CAD, USD, etc.) between label and amount
+    /(?:TOTAL|AMOUNT\s*DUE|SALE\s*TOTAL|TRANSACTION\s*TOTAL)\s*:?\s*(?:[A-Z]{2,3})?\s*\$?\s*(\d{1,4}\.\d{2})/,
     /\$\s*(\d{1,4}\.\d{2})\s*(?:TOTAL|DUE)/,
+    // Esso "EREG $ 96.16" — grade code followed by total
+    /^E?REG\s+\$\s*(\d{1,4}\.\d{2})/m,
   ]
   for (const p of patterns) {
-    const m = text.match(p)
+    const m = upper.match(p)
     if (m) return m[1]
   }
   return ''
@@ -133,9 +156,9 @@ function parseTotalCost(text: string): string {
 function parseDate(lines: string[]): string {
   const today = new Date().toISOString().slice(0, 10)
   const patterns: [RegExp, (m: RegExpMatchArray) => string][] = [
-    // YYYY-MM-DD or YYYY/MM/DD
-    [/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/, m => `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`],
-    // MM/DD/YYYY or DD/MM/YYYY — ambiguous; assume MM/DD/YYYY for now
+    // YYYY-MM-DD (with optional time after — Esso format "2026-03-19 16:31:40")
+    [/(\d{4})[-/](\d{2})[-/](\d{2})(?:\s+\d{2}:\d{2})?/, m => `${m[1]}-${m[2]}-${m[3]}`],
+    // MM/DD/YYYY
     [/(\d{1,2})\/(\d{1,2})\/(\d{4})/, m => `${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`],
     // DD-MMM-YYYY (e.g. 21-MAR-2026)
     [/(\d{1,2})[-\s]([A-Z]{3})[-\s](\d{4})/i, m => {
@@ -151,7 +174,6 @@ function parseDate(lines: string[]): string {
       if (m) {
         try {
           const result = fmt(m)
-          // Basic sanity check — must be within ±5 years of today
           const yr = parseInt(result.slice(0, 4))
           const now = new Date().getFullYear()
           if (yr >= now - 5 && yr <= now + 1) return result
@@ -163,10 +185,10 @@ function parseDate(lines: string[]): string {
   return today
 }
 
-/** Best-effort: take the first non-numeric line as a station name */
+/** Best-effort: take the first non-numeric, non-junk line as a station name */
 function parseStation(lines: string[]): string {
-  const skip = /^[\d\s$.,/:-]+$|RECEIPT|WELCOME|THANK|CUSTOMER|TRANSACTION|PUMP|GRADE/i
-  for (const line of lines.slice(0, 8)) {
+  const skip = /^[\d\s$.,/*:-]+$|RECEIPT|WELCOME|THANK|CUSTOMER|TRANSACTION|PUMP|GRADE|EXPRESS|PAY/i
+  for (const line of lines.slice(0, 10)) {
     if (line.length >= 3 && !skip.test(line)) return line
   }
   return ''
@@ -179,25 +201,31 @@ function parseStation(lines: string[]): string {
 function parseOdometer(text: string): string {
   const upper = text.toUpperCase()
 
-  // 1. Prefer a number right after an ODO / ODOMETER label
-  const labeled = upper.match(/(?:ODO(?:METER)?|MILEAGE|KM)\s*[:\s]\s*([\d][,\s\d]{3,8})/)
-  if (labeled) {
-    const v = labeled[1].replace(/[,\s]/g, '')
+  // 1. Best signal: a 5-6 digit number immediately followed by "km" on the display
+  //    e.g. "272480 km" or "272 480 km" or "272,480km"
+  //    Also handles dot-matrix OCR noise where a space may appear mid-number.
+  const beforeKm = upper.match(/(\d[\d\s,]{4,7})\s*KM\b/)
+  if (beforeKm) {
+    const v = beforeKm[1].replace(/[\s,]/g, '')
     const n = parseInt(v, 10)
     if (n >= 10_000 && n <= 999_999) return String(n)
   }
 
-  // 2. Collect all plausible 5–6 digit numbers (with optional comma/space separators)
-  //    e.g. "272,500" "272 500" "272500"
+  // 2. Number right after an ODO/ODOMETER label
+  const labeled = upper.match(/(?:ODO(?:METER)?|MILEAGE)\s*[:\s]\s*([\d][\d\s,]{4,7})/)
+  if (labeled) {
+    const v = labeled[1].replace(/[\s,]/g, '')
+    const n = parseInt(v, 10)
+    if (n >= 10_000 && n <= 999_999) return String(n)
+  }
+
+  // 3. Fall back: largest standalone 5–6 digit number in plausible range
   const normalised = text.replace(/,/g, '').replace(/(\d)\s(\d)/g, '$1$2')
   const candidates: number[] = []
   for (const m of normalised.matchAll(/\b(\d{5,6})\b/g)) {
     const n = parseInt(m[1], 10)
     if (n >= 10_000 && n <= 999_999) candidates.push(n)
   }
-
   if (candidates.length === 0) return ''
-
-  // Pick the largest — dashboard readings dominate trip meters and other small numbers
   return String(Math.max(...candidates))
 }
