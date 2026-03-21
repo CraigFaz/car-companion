@@ -17,6 +17,13 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v1.2',
+    date: '2026-03-21',
+    notes: [
+      'Fixed: page content no longer hidden behind bottom navigation bar',
+    ],
+  },
+  {
     version: 'v1.1',
     date: '2026-03-21',
     notes: [
@@ -92,7 +99,7 @@ export default function App() {
       </header>
 
       {/* Main */}
-      <main className="main-content" style={{ maxWidth: 1100, margin: '0 auto', padding: '1rem' }}>
+      <main className="main-content" style={{ maxWidth: 1100, margin: '0 auto', padding: '1rem 1rem calc(1rem + 60px + env(safe-area-inset-bottom))' }}>
         {!vehicle && <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--sub)' }}>Loading…</div>}
         {vehicle && tab === 'dashboard'   && <Dashboard vehicle={vehicle} />}
         {vehicle && tab === 'fuel'        && <FuelLog vehicleId={vehicle.id} />}
