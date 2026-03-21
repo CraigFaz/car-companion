@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import type { ScanPrefill } from '../types'
 
-// ── Field display config ────────────────────────────────────────────────────
+// ── Field display config ─────────────────────────────────────────────────────
 
 interface FieldCfg {
   key: string
@@ -12,35 +12,33 @@ interface FieldCfg {
 }
 
 const FIELDS: FieldCfg[] = [
-  { key: 'date',         label: 'Date',          color: '#3b82f6', format: v => v as string },
-  { key: 'station',      label: 'Station',        color: '#a855f7', format: v => v as string },
-  { key: 'grade',        label: 'Grade',          color: '#f97316', format: v => v as string },
-  { key: 'volume_l',     label: 'Volume',         color: '#22c55e', format: v => `${Number(v).toFixed(3)} L` },
-  { key: 'price_per_l',  label: 'Price / Litre',  color: '#06b6d4', format: v => `$${Number(v).toFixed(3)}` },
-  { key: 'total_cost',   label: 'Total Cost',     color: '#f59e0b', format: v => `$${Number(v).toFixed(2)}` },
-  { key: 'odometer_km',  label: 'Odometer',       color: '#f43f5e', format: v => `${Number(v).toLocaleString()} km` },
+  { key: 'date',         label: 'Date',         color: '#3b82f6', format: v => v as string },
+  { key: 'station',      label: 'Station',       color: '#a855f7', format: v => v as string },
+  { key: 'grade',        label: 'Grade',         color: '#f97316', format: v => v as string },
+  { key: 'volume_l',     label: 'Volume',        color: '#22c55e', format: v => `${Number(v).toFixed(3)} L` },
+  { key: 'price_per_l',  label: 'Price / Litre', color: '#06b6d4', format: v => `$${Number(v).toFixed(3)}` },
+  { key: 'total_cost',   label: 'Total Cost',    color: '#f59e0b', format: v => `$${Number(v).toFixed(2)}` },
 ]
 
-// ── Types ───────────────────────────────────────────────────────────────────
+const ODO_COLOR = '#f43f5e'
+
+// ── Types ────────────────────────────────────────────────────────────────────
 
 interface ScanField {
   value: string | number | null
   confidence: 'high' | 'medium' | 'low'
 }
 
-interface BoundingBox {
-  x: number
-  y: number
-  w: number
-  h: number
-}
-
 interface ScanResult {
   fields: Record<string, ScanField>
-  boxes: Record<string, BoundingBox>
+  boxes: Record<string, { x: number; y: number; w: number; h: number }>
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+interface OdoResult {
+  odometer_km: ScanField
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function resizeToJpeg(file: File, maxDim = 1600): Promise<{ data: string; mediaType: 'image/jpeg' }> {
   return new Promise((resolve, reject) => {
@@ -63,23 +61,31 @@ function resizeToJpeg(file: File, maxDim = 1600): Promise<{ data: string; mediaT
   })
 }
 
-function resultToPrefill(result: ScanResult): ScanPrefill {
+async function callEdgeFunction(image: string, mediaType: string, type: 'receipt' | 'odometer') {
+  const { data, error } = await supabase.functions.invoke('scan-receipt', {
+    body: { image, mediaType, type },
+  })
+  if (error) throw new Error(error.message ?? 'Edge function error')
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+
+function buildPrefill(result: ScanResult, odoKm: number | null): ScanPrefill {
   const get = (key: string) => result.fields[key]?.value
   const GRADES = ['Regular 87', 'Plus 89', 'Premium 91', 'Premium 93']
   const rawGrade = get('grade')
-  const grade = (typeof rawGrade === 'string' && GRADES.includes(rawGrade)) ? rawGrade : undefined
   return {
-    date:           typeof get('date') === 'string'           ? get('date') as string            : undefined,
-    station:        typeof get('station') === 'string'        ? get('station') as string         : undefined,
-    grade,
-    liters:         get('volume_l')    != null                ? String(get('volume_l'))          : undefined,
-    price_per_liter:get('price_per_l') != null                ? String(get('price_per_l'))       : undefined,
-    total_cost:     get('total_cost')  != null                ? String(get('total_cost'))        : undefined,
-    odometer_km:    get('odometer_km') != null                ? String(get('odometer_km'))       : undefined,
+    date:            typeof get('date') === 'string'    ? get('date') as string          : undefined,
+    station:         typeof get('station') === 'string' ? get('station') as string       : undefined,
+    grade:           typeof rawGrade === 'string' && GRADES.includes(rawGrade) ? rawGrade : undefined,
+    liters:          get('volume_l')    != null          ? String(get('volume_l'))        : undefined,
+    price_per_liter: get('price_per_l') != null          ? String(get('price_per_l'))     : undefined,
+    total_cost:      get('total_cost')  != null          ? String(get('total_cost'))      : undefined,
+    odometer_km:     odoKm              != null          ? String(odoKm)                  : undefined,
   }
 }
 
-// ── Styles ──────────────────────────────────────────────────────────────────
+// ── Shared styles ─────────────────────────────────────────────────────────────
 
 const card: React.CSSProperties = {
   background: 'var(--bg2)',
@@ -88,189 +94,271 @@ const card: React.CSSProperties = {
   padding: '1rem 1.25rem',
 }
 
-// ── Component ────────────────────────────────────────────────────────────────
+function ConfidenceBadge({ confidence }: { confidence: 'high' | 'medium' | 'low' }) {
+  if (confidence === 'high') return <span title="High confidence" style={{ fontSize: '0.8rem', color: '#22c55e' }}>✓</span>
+  if (confidence === 'low')  return <span title="Low confidence — verify manually" style={{ fontSize: '0.8rem', color: '#f59e0b' }}>⚠</span>
+  return null
+}
+
+function UploadZone({ label, hint, icon, onClick, disabled }: {
+  label: string; hint: string; icon: string; onClick: () => void; disabled?: boolean
+}) {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <div
+      onClick={disabled ? undefined : onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        gap: '0.5rem', padding: '1.25rem 1rem', borderRadius: 10, cursor: disabled ? 'default' : 'pointer',
+        border: `2px dashed ${hovered && !disabled ? 'var(--amber)' : 'var(--border)'}`,
+        background: 'var(--bg)', opacity: disabled ? 0.4 : 1,
+        transition: 'border-color 0.15s',
+      }}
+    >
+      <span style={{ fontSize: '1.75rem', lineHeight: 1 }}>{icon}</span>
+      <div style={{ fontWeight: 600, fontSize: '0.85rem', textAlign: 'center' }}>{label}</div>
+      <div style={{ color: 'var(--sub)', fontSize: '0.72rem', textAlign: 'center' }}>{hint}</div>
+    </div>
+  )
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
 
 interface Props {
   onUseScan: (prefill: ScanPrefill) => void
 }
 
 export default function ScanReceipt({ onUseScan }: Props) {
-  const [imageUrl, setImageUrl]   = useState<string | null>(null)
-  const [scanning, setScanning]   = useState(false)
-  const [result, setResult]       = useState<ScanResult | null>(null)
-  const [error, setError]         = useState<string | null>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
+  // Receipt
+  const [receiptUrl,      setReceiptUrl]      = useState<string | null>(null)
+  const [receiptResult,   setReceiptResult]   = useState<ScanResult | null>(null)
+  const [receiptScanning, setReceiptScanning] = useState(false)
+  const [receiptError,    setReceiptError]    = useState<string | null>(null)
+  const receiptRef = useRef<HTMLInputElement>(null)
 
-  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+  // Odometer
+  const [odoUrl,      setOdoUrl]      = useState<string | null>(null)
+  const [odoResult,   setOdoResult]   = useState<OdoResult | null>(null)
+  const [odoScanning, setOdoScanning] = useState(false)
+  const [odoError,    setOdoError]    = useState<string | null>(null)
+  const odoRef = useRef<HTMLInputElement>(null)
+
+  async function handleReceiptFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     e.target.value = ''
-
-    // Show preview immediately
     const previewUrl = URL.createObjectURL(file)
-    setImageUrl(prev => { if (prev) URL.revokeObjectURL(prev); return previewUrl })
-    setResult(null)
-    setError(null)
-    setScanning(true)
-
+    setReceiptUrl(prev => { if (prev) URL.revokeObjectURL(prev); return previewUrl })
+    setReceiptResult(null)
+    setReceiptError(null)
+    setReceiptScanning(true)
     try {
       const { data, mediaType } = await resizeToJpeg(file)
-      const { data: fnData, error: fnErr } = await supabase.functions.invoke('scan-receipt', {
-        body: { image: data, mediaType },
-      })
-      if (fnErr) throw new Error(fnErr.message ?? 'Edge function error')
-      if (fnData?.error) throw new Error(fnData.error)
-      setResult(fnData as ScanResult)
+      const result = await callEdgeFunction(data, mediaType, 'receipt')
+      setReceiptResult(result as ScanResult)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setReceiptError(err instanceof Error ? err.message : String(err))
     }
-    setScanning(false)
+    setReceiptScanning(false)
+  }
+
+  async function handleOdoFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    const previewUrl = URL.createObjectURL(file)
+    setOdoUrl(prev => { if (prev) URL.revokeObjectURL(prev); return previewUrl })
+    setOdoResult(null)
+    setOdoError(null)
+    setOdoScanning(true)
+    try {
+      const { data, mediaType } = await resizeToJpeg(file)
+      const result = await callEdgeFunction(data, mediaType, 'odometer')
+      setOdoResult(result as OdoResult)
+    } catch (err) {
+      setOdoError(err instanceof Error ? err.message : String(err))
+    }
+    setOdoScanning(false)
   }
 
   function handleReset() {
-    if (imageUrl) URL.revokeObjectURL(imageUrl)
-    setImageUrl(null)
-    setResult(null)
-    setError(null)
+    if (receiptUrl) URL.revokeObjectURL(receiptUrl)
+    if (odoUrl)     URL.revokeObjectURL(odoUrl)
+    setReceiptUrl(null); setReceiptResult(null); setReceiptError(null)
+    setOdoUrl(null);     setOdoResult(null);     setOdoError(null)
   }
 
-  const noFieldsFound = result && Object.values(result.fields).every(f => f.value == null)
+  const odoKm = odoResult?.odometer_km?.value != null ? Number(odoResult.odometer_km.value) : null
+  const receiptHasFields = receiptResult && Object.values(receiptResult.fields).some(f => f.value != null)
+
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
-      {/* Upload zone — hidden once image is selected */}
-      {!imageUrl && (
-        <div
-          onClick={() => fileRef.current?.click()}
-          style={{
-            ...card,
-            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-            minHeight: 200, cursor: 'pointer', gap: '0.75rem',
-            border: '2px dashed var(--border)',
-            background: 'var(--bg)',
-            transition: 'border-color 0.15s',
-          }}
-          onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--amber)')}
-          onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-        >
-          <span style={{ fontSize: '2.5rem', lineHeight: 1 }}>📷</span>
-          <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>Tap or click to upload a receipt</div>
-          <div style={{ color: 'var(--sub)', fontSize: '0.75rem' }}>JPG, PNG, WebP — resized automatically</div>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/gif"
-            style={{ display: 'none' }}
-            onChange={handleFile}
-          />
+      {/* ── Step 1: Nothing uploaded ── */}
+      {!receiptUrl && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <div style={{ color: 'var(--sub)', fontSize: '0.8rem' }}>
+            Upload your receipt first, then optionally add an odometer photo.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div onClick={() => receiptRef.current?.click()} style={{ cursor: 'pointer' }}>
+              <UploadZone label="Receipt Photo" hint="Date, station, litres, price, total" icon="🧾" onClick={() => {}} />
+            </div>
+            <UploadZone label="Odometer Photo" hint="Add after receipt scan" icon="🔢" onClick={() => {}} disabled />
+          </div>
+          <input ref={receiptRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display: 'none' }} onChange={handleReceiptFile} />
         </div>
       )}
 
-      {/* Image + results panel */}
-      {imageUrl && (
-        <>
-          {/* Scanning indicator */}
-          {scanning && (
+      {/* ── Step 2+: Receipt uploaded ── */}
+      {receiptUrl && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+          {/* Scanning banners */}
+          {receiptScanning && (
             <div style={{ ...card, display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--sub)', fontSize: '0.875rem' }}>
               <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span>
-              Analysing with Claude…
+              Reading receipt with Claude…
+            </div>
+          )}
+          {odoScanning && (
+            <div style={{ ...card, display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--sub)', fontSize: '0.875rem' }}>
+              <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span>
+              Reading odometer with Claude…
             </div>
           )}
 
-          {/* Error */}
-          {error && (
-            <div style={{ ...card, border: '1px solid #f43f5e', color: '#f43f5e', fontSize: '0.875rem' }}>
-              <strong>Scan failed:</strong> {error}
-            </div>
-          )}
-
-          {/* Side-by-side layout */}
+          {/* Main layout: images left, fields right */}
           <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-start' }}>
 
-            {/* Image */}
-            <div style={{ flex: '1 1 280px', minWidth: 0 }}>
+            {/* Images column */}
+            <div style={{ flex: '1 1 260px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {/* Receipt image */}
               <div style={card}>
-                <img
-                  src={imageUrl}
-                  alt="Receipt"
-                  style={{ width: '100%', borderRadius: 6, display: 'block', maxHeight: 520, objectFit: 'contain' }}
-                />
-                {/* Note about future highlighting */}
-                {result && (
-                  <div style={{ marginTop: '0.5rem', fontSize: '0.7rem', color: 'var(--sub)', textAlign: 'center' }}>
-                    Field highlighting coming soon
-                  </div>
+                <div style={{ fontSize: '0.65rem', color: 'var(--sub)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>Receipt</div>
+                <img src={receiptUrl} alt="Receipt" style={{ width: '100%', borderRadius: 6, display: 'block', maxHeight: 400, objectFit: 'contain' }} />
+                {receiptError && <div style={{ marginTop: '0.5rem', color: '#f43f5e', fontSize: '0.8rem' }}>Scan failed: {receiptError}</div>}
+              </div>
+
+              {/* Odometer zone — always shown once receipt is uploaded */}
+              <div style={card}>
+                <div style={{ fontSize: '0.65rem', color: 'var(--sub)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>Odometer</div>
+
+                {!odoUrl ? (
+                  <>
+                    <UploadZone
+                      label="Add Odometer Photo"
+                      hint="Optional — for km reading"
+                      icon="🔢"
+                      onClick={() => odoRef.current?.click()}
+                      disabled={odoScanning}
+                    />
+                    <input ref={odoRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display: 'none' }} onChange={handleOdoFile} />
+                  </>
+                ) : (
+                  <>
+                    <img src={odoUrl} alt="Odometer" style={{ width: '100%', borderRadius: 6, display: 'block', maxHeight: 180, objectFit: 'contain' }} />
+                    {odoError && <div style={{ marginTop: '0.5rem', color: '#f43f5e', fontSize: '0.8rem' }}>Scan failed: {odoError}</div>}
+                    {/* Re-scan odometer */}
+                    {!odoScanning && (
+                      <button
+                        onClick={() => { if (odoUrl) URL.revokeObjectURL(odoUrl); setOdoUrl(null); setOdoResult(null); setOdoError(null); setTimeout(() => odoRef.current?.click(), 50) }}
+                        style={{ marginTop: '0.5rem', background: 'none', border: 'none', color: 'var(--sub)', fontSize: '0.75rem', cursor: 'pointer', padding: 0 }}
+                      >
+                        ↺ Replace photo
+                      </button>
+                    )}
+                    <input ref={odoRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display: 'none' }} onChange={handleOdoFile} />
+                  </>
                 )}
               </div>
             </div>
 
-            {/* JSON results */}
-            {result && (
-              <div style={{ flex: '1 1 260px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                <div style={card}>
-                  <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '1rem' }}>
-                    Extracted Fields
-                  </div>
+            {/* Fields column */}
+            <div style={{ flex: '1 1 240px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <div style={card}>
+                <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.75rem' }}>Extracted Fields</div>
 
-                  {noFieldsFound ? (
-                    <div style={{ color: 'var(--sub)', fontSize: '0.875rem' }}>
-                      No fields detected — image may be unclear or not a fuel receipt.
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                      {FIELDS.map(cfg => {
-                        const field = result.fields[cfg.key]
-                        if (!field || field.value == null) return null
-                        return (
-                          <div
-                            key={cfg.key}
-                            style={{
-                              display: 'flex', alignItems: 'center', gap: '0.65rem',
-                              padding: '0.5rem 0.75rem',
-                              background: cfg.color + '12',
-                              border: `1px solid ${cfg.color}30`,
-                              borderRadius: 7,
-                              borderLeft: `3px solid ${cfg.color}`,
-                            }}
-                          >
-                            <div style={{ flex: 1 }}>
-                              <div style={{ fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: cfg.color, marginBottom: 2 }}>
-                                {cfg.label}
-                              </div>
-                              <div style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.9rem', fontWeight: 600 }}>
-                                {cfg.format(field.value)}
-                              </div>
-                            </div>
-                            {field.confidence === 'low' && (
-                              <span title="Low confidence — verify manually" style={{ fontSize: '0.8rem', color: '#f59e0b' }}>⚠</span>
-                            )}
-                            {field.confidence === 'high' && (
-                              <span title="High confidence" style={{ fontSize: '0.8rem', color: '#22c55e' }}>✓</span>
-                            )}
+                {!receiptResult && !receiptScanning && !receiptError && (
+                  <div style={{ color: 'var(--sub)', fontSize: '0.875rem' }}>Scanning…</div>
+                )}
+
+                {receiptResult && !receiptHasFields && (
+                  <div style={{ color: 'var(--sub)', fontSize: '0.875rem' }}>No fields detected — image may be unclear or not a fuel receipt.</div>
+                )}
+
+                {receiptResult && receiptHasFields && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                    {FIELDS.map(cfg => {
+                      const field = receiptResult.fields[cfg.key]
+                      if (!field || field.value == null) return null
+                      return (
+                        <div key={cfg.key} style={{
+                          display: 'flex', alignItems: 'center', gap: '0.65rem',
+                          padding: '0.45rem 0.75rem',
+                          background: cfg.color + '12', border: `1px solid ${cfg.color}30`,
+                          borderRadius: 7, borderLeft: `3px solid ${cfg.color}`,
+                        }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '0.58rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: cfg.color, marginBottom: 2 }}>{cfg.label}</div>
+                            <div style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.875rem', fontWeight: 600 }}>{cfg.format(field.value)}</div>
                           </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
+                          <ConfidenceBadge confidence={field.confidence} />
+                        </div>
+                      )
+                    })}
 
-                {/* Action buttons */}
+                    {/* Odometer field — from odo scan or receipt */}
+                    {(odoKm != null || receiptResult.fields['odometer_km']?.value != null) && (() => {
+                      const val   = odoKm ?? Number(receiptResult.fields['odometer_km']!.value)
+                      const conf  = odoResult?.odometer_km?.confidence ?? receiptResult.fields['odometer_km']?.confidence ?? 'medium'
+                      const fromOdo = odoKm != null
+                      return (
+                        <div style={{
+                          display: 'flex', alignItems: 'center', gap: '0.65rem',
+                          padding: '0.45rem 0.75rem',
+                          background: ODO_COLOR + '12', border: `1px solid ${ODO_COLOR}30`,
+                          borderRadius: 7, borderLeft: `3px solid ${ODO_COLOR}`,
+                        }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '0.58rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: ODO_COLOR, marginBottom: 2 }}>
+                              Odometer{fromOdo ? ' (from photo)' : ''}
+                            </div>
+                            <div style={{ fontFamily: 'DM Mono, monospace', fontSize: '0.875rem', fontWeight: 600 }}>{val.toLocaleString()} km</div>
+                          </div>
+                          <ConfidenceBadge confidence={conf} />
+                        </div>
+                      )
+                    })()}
+
+                    {/* Odometer missing hint */}
+                    {odoKm == null && receiptResult.fields['odometer_km']?.value == null && !odoUrl && (
+                      <div style={{ fontSize: '0.72rem', color: 'var(--sub)', padding: '0.4rem 0.75rem', borderRadius: 6, background: 'var(--bg3)' }}>
+                        Odometer not on receipt — add a photo on the left
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Action buttons */}
+              {receiptHasFields && !receiptScanning && (
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  {!noFieldsFound && (
-                    <button
-                      onClick={() => onUseScan(resultToPrefill(result))}
-                      style={{
-                        flex: 1,
-                        background: 'var(--amber)', color: '#000',
-                        border: 'none', borderRadius: 6, padding: '10px 16px',
-                        cursor: 'pointer', fontWeight: 700, fontSize: '0.875rem',
-                        fontFamily: 'Barlow, sans-serif',
-                      }}
-                    >
-                      Use These Values →
-                    </button>
-                  )}
+                  <button
+                    onClick={() => onUseScan(buildPrefill(receiptResult!, odoKm))}
+                    style={{
+                      flex: 1, background: 'var(--amber)', color: '#000',
+                      border: 'none', borderRadius: 6, padding: '10px 16px',
+                      cursor: 'pointer', fontWeight: 700, fontSize: '0.875rem',
+                      fontFamily: 'Barlow, sans-serif',
+                    }}
+                  >
+                    Use These Values →
+                  </button>
                   <button
                     onClick={handleReset}
                     style={{
@@ -279,32 +367,21 @@ export default function ScanReceipt({ onUseScan }: Props) {
                       cursor: 'pointer', fontSize: '0.875rem', fontFamily: 'Barlow, sans-serif',
                     }}
                   >
-                    Scan Another
+                    Start Over
                   </button>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Scan another button when scanning or error */}
-            {(scanning || error) && (
-              <div>
-                <button
-                  onClick={handleReset}
-                  style={{
-                    background: 'transparent', color: 'var(--sub)',
-                    border: '1px solid var(--border)', borderRadius: 6, padding: '8px 16px',
-                    cursor: 'pointer', fontSize: '0.875rem', fontFamily: 'Barlow, sans-serif',
-                  }}
-                >
+              {(receiptScanning || (!receiptResult && !receiptError)) && (
+                <button onClick={handleReset} style={{ background: 'transparent', color: 'var(--sub)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 16px', cursor: 'pointer', fontSize: '0.875rem', fontFamily: 'Barlow, sans-serif' }}>
                   Cancel
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
-        </>
+        </div>
       )}
 
-      {/* Spinner keyframe — injected once */}
       <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
     </div>
   )
