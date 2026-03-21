@@ -1,8 +1,6 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { scanFuelReceipt, scanOdometer } from '../lib/ocr'
-import type { OcrResult } from '../lib/ocr'
-import type { FuelEntry } from '../types'
+import type { FuelEntry, ScanPrefill } from '../types'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 
 const GRADES = ['Regular 87', 'Plus 89', 'Premium 91', 'Premium 93']
@@ -79,27 +77,31 @@ const EMPTY_FORM: FormState = {
   notes: '',
 }
 
-interface Props { vehicleId: string }
+interface Props {
+  vehicleId: string
+  prefill?: ScanPrefill | null
+  onClearPrefill?: () => void
+}
 
-export default function FuelLog({ vehicleId }: Props) {
+export default function FuelLog({ vehicleId, prefill, onClearPrefill }: Props) {
   const [entries, setEntries] = useState<FuelEntry[]>([])
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   // Tracks the last two calc fields the user touched — the third is always derived
   const [lastTwo, setLastTwo] = useState<CalcField[]>([])
-  const [scanning, setScanning] = useState(false)
-  const [scanPct, setScanPct] = useState(0)
-  const [scanNote, setScanNote] = useState('')
-  const [ocrScanning, setOcrScanning] = useState(false)
-  const [ocrPct, setOcrPct] = useState(0)
-  const [ocrNote, setOcrNote] = useState('')
-  const [ocrData, setOcrData] = useState<OcrResult | null>(null)
-  const [showRaw, setShowRaw] = useState(false)
-  const fileRef = useRef<HTMLInputElement>(null)
-  const odoRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { load() }, [vehicleId])
+
+  // Apply scan prefill: open form with pre-populated values
+  useEffect(() => {
+    if (!prefill) return
+    const filled: CalcField[] = (['liters', 'price_per_liter', 'total_cost'] as CalcField[]).filter(f => !!prefill[f as keyof typeof prefill])
+    setForm(f => ({ ...f, ...prefill }))
+    setLastTwo(filled.slice(-2) as CalcField[])
+    setShowForm(true)
+    onClearPrefill?.()
+  }, [prefill])
 
   async function load() {
     const { data } = await supabase
@@ -150,79 +152,12 @@ export default function FuelLog({ vehicleId }: Props) {
   function openForm() {
     setForm(EMPTY_FORM)
     setLastTwo([])
-    setScanNote('')
-    setOcrNote('')
-    setOcrData(null)
-    setShowRaw(false)
     setShowForm(true)
   }
 
   function closeForm() {
     setShowForm(false)
     setLastTwo([])
-    setScanNote('')
-    setOcrNote('')
-    setOcrData(null)
-    setShowRaw(false)
-  }
-
-  async function handleScanFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    e.target.value = ''
-    setScanning(true)
-    setScanPct(0)
-    setScanNote('')
-    setOcrData(null)
-    setShowRaw(false)
-    try {
-      const result = await scanFuelReceipt(file, setScanPct)
-      setOcrData(result)
-      const filled: CalcField[] = (['liters', 'price_per_liter', 'total_cost'] as CalcField[]).filter(f => !!result[f])
-      const newLastTwo = filled.slice(-2) as CalcField[]
-      setLastTwo(newLastTwo)
-      setForm(f => ({
-        ...f,
-        date: result.date || f.date,
-        liters: result.liters || f.liters,
-        price_per_liter: result.price_per_liter || f.price_per_liter,
-        total_cost: result.total_cost || f.total_cost,
-        station: result.station || f.station,
-        grade: result.grade || f.grade,
-      }))
-      const found = [
-        result.liters && 'litres',
-        result.price_per_liter && 'price/L',
-        result.total_cost && 'total',
-        result.station && 'station',
-        result.grade && 'grade',
-      ].filter(Boolean)
-      setScanNote(found.length ? `Filled: ${found.join(', ')} — review and correct as needed` : 'No fields recognised — enter manually')
-    } catch {
-      setScanNote('Scan failed — enter manually')
-    }
-    setScanning(false)
-  }
-
-  async function handleOdoFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    e.target.value = ''
-    setOcrScanning(true)
-    setOcrPct(0)
-    setOcrNote('')
-    try {
-      const result = await scanOdometer(file, setOcrPct)
-      if (result.odometer_km) {
-        setForm(f => ({ ...f, odometer_km: result.odometer_km }))
-        setOcrNote(`Read: ${Number(result.odometer_km).toLocaleString()} km — correct if needed`)
-      } else {
-        setOcrNote('No odometer reading found — enter manually')
-      }
-    } catch {
-      setOcrNote('Scan failed — enter manually')
-    }
-    setOcrScanning(false)
   }
 
   async function handleSave() {
@@ -241,8 +176,6 @@ export default function FuelLog({ vehicleId }: Props) {
       total_cost: t,
       station: form.station || null,
       notes: form.notes || null,
-      ocr_raw: ocrData?.raw ?? null,
-      ocr_meta: ocrData ? (Object.keys(ocrData.meta).length > 0 ? ocrData.meta as unknown as Record<string, unknown> : null) : null,
     })
     setForm(EMPTY_FORM)
     setLastTwo([])
@@ -336,70 +269,6 @@ export default function FuelLog({ vehicleId }: Props) {
       {/* Add form */}
       {showForm && (
         <div style={card}>
-
-          {/* Scan buttons */}
-          <div style={{ marginBottom: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-              {/* Receipt scanner — no capture attr so user can pick camera OR existing image */}
-              <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleScanFile} />
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                disabled={scanning}
-                style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 14px', color: scanning ? 'var(--sub)' : 'var(--text)', cursor: scanning ? 'not-allowed' : 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
-              >
-                <span>🧾</span>
-                {scanning ? `Scanning… ${scanPct}%` : 'Scan Receipt'}
-              </button>
-              {scanNote && (
-                <span style={{ fontSize: '0.75rem', color: scanNote.startsWith('Filled') ? 'var(--green)' : 'var(--sub)' }}>
-                  {scanNote}
-                </span>
-              )}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-              {/* Odometer scanner */}
-              <input ref={odoRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleOdoFile} />
-              <button
-                type="button"
-                onClick={() => odoRef.current?.click()}
-                disabled={ocrScanning}
-                style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 14px', color: ocrScanning ? 'var(--sub)' : 'var(--text)', cursor: ocrScanning ? 'not-allowed' : 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
-              >
-                <span>🔢</span>
-                {ocrScanning ? `Scanning… ${ocrPct}%` : 'Scan Odometer'}
-              </button>
-              {ocrNote && (
-                <span style={{ fontSize: '0.75rem', color: ocrNote.startsWith('Read') ? 'var(--green)' : 'var(--sub)' }}>
-                  {ocrNote}
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Raw OCR text — collapsible, always stored even if not shown */}
-          {ocrData && (
-            <div style={{ marginBottom: '0.75rem' }}>
-              <button
-                type="button"
-                onClick={() => setShowRaw(r => !r)}
-                style={{ background: 'none', border: 'none', color: 'var(--sub)', fontSize: '0.72rem', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: '0.3rem' }}
-              >
-                <span style={{ fontSize: '0.6rem' }}>{showRaw ? '▼' : '▶'}</span>
-                Raw OCR text
-                {Object.keys(ocrData.meta).length > 0 && (
-                  <span style={{ marginLeft: 6, color: 'var(--blue)' }}>
-                    +{Object.keys(ocrData.meta).length} extra fields stored
-                  </span>
-                )}
-              </button>
-              {showRaw && (
-                <pre style={{ marginTop: 6, background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 6, padding: '0.6rem 0.75rem', fontSize: '0.7rem', color: 'var(--sub)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 200, overflowY: 'auto' }}>
-                  {ocrData.raw || '(empty)'}
-                </pre>
-              )}
-            </div>
-          )}
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
             <div>

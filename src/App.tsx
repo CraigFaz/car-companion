@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './lib/supabase'
-import type { Vehicle } from './types'
+import type { Vehicle, ScanPrefill } from './types'
 import Dashboard from './pages/Dashboard'
 import FuelLog from './pages/FuelLog'
 import Maintenance from './pages/Maintenance'
 import Issues from './pages/Issues'
 import OilTopups from './pages/OilTopups'
+import ScanReceipt from './pages/ScanReceipt'
 
-type Tab = 'dashboard' | 'fuel' | 'maintenance' | 'issues' | 'oil'
+type Tab = 'dashboard' | 'fuel' | 'maintenance' | 'issues' | 'oil' | 'scan'
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'dashboard',   label: 'Dashboard',   icon: '⊞' },
@@ -15,35 +16,19 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'maintenance', label: 'Maintenance',  icon: '🔧' },
   { id: 'issues',      label: 'Issues',       icon: '⚠' },
   { id: 'oil',         label: 'Oil',          icon: '🛢' },
+  { id: 'scan',        label: 'Scan',         icon: '📷' },
 ]
 
 const CHANGELOG = [
   {
-    version: 'v1.8',
+    version: 'v1.9',
     date: '2026-03-21',
     notes: [
-      'OCR parser: fixed Esso fuzzy combo line — handles OCR garbling like "B58 317 AT $1649" → 58.317L @ $1.649/L',
-      'Station detection: now scans full receipt for known chains (Esso, Shell, Petro-Canada, Costco, etc.) before falling back to first line',
-    ],
-  },
-  {
-    version: 'v1.7',
-    date: '2026-03-21',
-    notes: [
-      'OCR handles multiple receipt formats: Esso, Petro-Canada, Shell, Costco, generic Canadian stations',
-      'Auto-detects fuel grade from receipt text (EREG → Regular 87, PREM → Premium 91, etc.)',
-      'All raw OCR text saved to database — viewable via collapsible toggle in the add form',
-      'Extra receipt fields (pump #, transaction #, HST #, tax amounts, address, time) saved to ocr_meta for future use',
-      'DB migration: added ocr_raw (text) and ocr_meta (jsonb) columns to fuel_entries',
-    ],
-  },
-  {
-    version: 'v1.6',
-    date: '2026-03-21',
-    notes: [
-      'Fuel form: Scan Receipt button — photo or image upload runs Tesseract.js OCR on the receipt',
-      'Auto-fills litres, price/L, total, station name, and date from the scanned text',
-      'Fields are pre-filled for review; any-two-of-three math still applies after scanning',
+      'New Scan tab: upload a receipt photo and Claude AI extracts date, station, grade, litres, price/L, total, and odometer',
+      'Results shown side-by-side with the receipt image — each field colour-coded with confidence indicator',
+      '"Use These Values" pre-fills the fuel log form and switches to the Fuel tab automatically',
+      'Replaced Tesseract.js OCR (client-side, poor accuracy) with Claude Opus via Supabase edge function',
+      'Receipt is auto-resized to JPEG before sending — handles all image formats including HEIC on supported browsers',
     ],
   },
   {
@@ -108,6 +93,12 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('dashboard')
   const [vehicle, setVehicle] = useState<Vehicle | null>(null)
   const [showChangelog, setShowChangelog] = useState(false)
+  const [scanPrefill, setScanPrefill] = useState<ScanPrefill | null>(null)
+
+  function handleUseScan(prefill: ScanPrefill) {
+    setScanPrefill(prefill)
+    setTab('fuel')
+  }
 
   useEffect(() => {
     supabase.from('vehicles').select('*').single().then(({ data }) => {
@@ -159,10 +150,11 @@ export default function App() {
       <main className="main-content" style={{ maxWidth: 1100, margin: '0 auto', padding: '1rem 1rem calc(1rem + 60px + env(safe-area-inset-bottom))' }}>
         {!vehicle && <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--sub)' }}>Loading…</div>}
         {vehicle && tab === 'dashboard'   && <Dashboard vehicle={vehicle} />}
-        {vehicle && tab === 'fuel'        && <FuelLog vehicleId={vehicle.id} />}
+        {vehicle && tab === 'fuel'        && <FuelLog vehicleId={vehicle.id} prefill={scanPrefill} onClearPrefill={() => setScanPrefill(null)} />}
         {vehicle && tab === 'maintenance' && <Maintenance vehicleId={vehicle.id} />}
         {vehicle && tab === 'issues'      && <Issues vehicleId={vehicle.id} />}
         {vehicle && tab === 'oil'         && <OilTopups vehicleId={vehicle.id} />}
+        {vehicle && tab === 'scan'        && <ScanReceipt onUseScan={handleUseScan} />}
       </main>
 
       {/* Mobile bottom nav */}
