@@ -24,6 +24,8 @@ export interface FuelEntry {
   station: string | null
   flagged: boolean
   notes: string | null
+  ocr_raw: string | null
+  ocr_meta: Record<string, unknown> | null
 }
 
 export interface MaintenanceRecord {
