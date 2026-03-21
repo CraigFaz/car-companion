@@ -19,6 +19,14 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v1.8',
+    date: '2026-03-21',
+    notes: [
+      'OCR parser: fixed Esso fuzzy combo line — handles OCR garbling like "B58 317 AT $1649" → 58.317L @ $1.649/L',
+      'Station detection: now scans full receipt for known chains (Esso, Shell, Petro-Canada, Costco, etc.) before falling back to first line',
+    ],
+  },
+  {
     version: 'v1.7',
     date: '2026-03-21',
     notes: [

@@ -117,17 +117,24 @@ function parseReceipt(text: string): Omit<OcrResult, 'raw'> {
 // ---------------------------------------------------------------------------
 
 function parseComboLine(upper: string): { liters: string; price_per_liter: string } {
-  const patterns = [
+  const patterns: [RegExp, (m: RegExpMatchArray) => { liters: string; price_per_liter: string }][] = [
     // "58.317L AT $1.649/L"  or  "58.317 L @ $1.649/L"
-    /(\d{1,3}\.\d{3})\s*L(?:ITRES?)?\s+(?:AT|@)\s+\$?(\d{1,3}\.\d{3})\s*\/\s*L/,
+    [/(\d{1,3}\.\d{3})\s*L(?:ITRES?)?\s+(?:AT|@)\s+\$?(\d{1,3}\.\d{3})\s*\/\s*L/,
+      m => ({ liters: m[1], price_per_liter: m[2] })],
     // "58.317L @ 1.649 = $96.16"  (Costco-style)
-    /(\d{1,3}\.\d{3})\s*L\s+@\s+(\d{1,3}\.\d{3})\s*=/,
+    [/(\d{1,3}\.\d{3})\s*L\s+@\s+(\d{1,3}\.\d{3})\s*=/,
+      m => ({ liters: m[1], price_per_liter: m[2] })],
     // "VOLUME 58.317  PRICE 1.649"  (some generics)
-    /VOLUME\s+(\d{1,3}\.\d{3})\s+PRICE\s+(\d{1,3}\.\d{3})/,
+    [/VOLUME\s+(\d{1,3}\.\d{3})\s+PRICE\s+(\d{1,3}\.\d{3})/,
+      m => ({ liters: m[1], price_per_liter: m[2] })],
+    // Fuzzy Esso OCR: "B58 317 AT $1649" → 58.317L @ $1.649/L
+    // OCR artefacts: leading letter, space as decimal, 4-digit price without decimal
+    [/[A-Z]?(\d{2,3})\s+(\d{3})\s+AT\s+\$?(\d{4})\b/,
+      m => ({ liters: `${m[1]}.${m[2]}`, price_per_liter: `${m[3][0]}.${m[3].slice(1)}` })],
   ]
-  for (const p of patterns) {
+  for (const [p, extract] of patterns) {
     const m = upper.match(p)
-    if (m) return { liters: m[1], price_per_liter: m[2] }
+    if (m) return extract(m)
   }
   return { liters: '', price_per_liter: '' }
 }
@@ -234,7 +241,14 @@ function parseDate(lines: string[]): string {
 // Station name
 // ---------------------------------------------------------------------------
 
+const KNOWN_CHAINS = /\b(ESSO|PETRO[\s-]?CANADA|SHELL|COSTCO|CANADIAN\s+TIRE|MOBIL|SUNOCO|HUSKY|PIONEER|CO-?OP|ULTRAMAR)\b/i
+
 function parseStation(lines: string[]): string {
+  // Prefer lines that name a known chain — scan wider window
+  for (const line of lines.slice(0, 20)) {
+    if (KNOWN_CHAINS.test(line)) return line.trim()
+  }
+  // Fallback: first non-noise line in the header area
   const skip = /^[\d\s$.,/*:-]+$|RECEIPT|WELCOME|THANK|CUSTOMER|TRANS|PUMP|GRADE|EXPRESS\s+PAY|HST|GST|INCLUDED|STATION\s*#/i
   for (const line of lines.slice(0, 12)) {
     if (line.length >= 3 && !skip.test(line)) return line
