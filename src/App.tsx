@@ -17,6 +17,16 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v1.1',
+    date: '2026-03-21',
+    notes: [
+      'Fuel form: any-two-of-three math — enter litres + price/L, or litres + total, or price/L + total; third auto-calculates',
+      'Calculated field highlighted with blue border so you know which value was derived',
+      'Fuel grade dropdown: Regular 87 / Plus 89 / Premium 91 / Premium 93',
+      'Flagged entries: L/100km outside 8–20 shown in yellow with warning icon — not hidden',
+    ],
+  },
+  {
     version: 'v1.0',
     date: '2026-03-18',
     notes: [

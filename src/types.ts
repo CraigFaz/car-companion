@@ -17,11 +17,12 @@ export interface FuelEntry {
   vehicle_id: string
   date: string
   odometer_km: number
-  liters: number
-  price_per_liter: number
-  total_cost: number
+  liters: number | null
+  price_per_liter: number | null
+  total_cost: number | null
+  grade: string | null
   station: string | null
-  full_tank: boolean
+  flagged: boolean
   notes: string | null
 }
 
