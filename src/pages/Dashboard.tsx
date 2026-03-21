@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import type { Vehicle, FuelEntry, MaintenanceRecord, Issue } from '../types'
+import type { Vehicle, FuelEntry, RepairEntry, Issue } from '../types'
 
 function fmtDate(d: string) {
   return new Date(d + 'T00:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })
@@ -56,7 +56,7 @@ interface Props { vehicle: Vehicle }
 
 export default function Dashboard({ vehicle }: Props) {
   const [fuel, setFuel] = useState<FuelEntry[]>([])
-  const [maintenance, setMaintenance] = useState<MaintenanceRecord[]>([])
+  const [repairs, setRepairs] = useState<RepairEntry[]>([])
   const [issues, setIssues] = useState<Issue[]>([])
   const [collapsed, setCollapsed] = useState({ vehicle: false, stats: false, issues: false, fillups: false })
 
@@ -64,7 +64,7 @@ export default function Dashboard({ vehicle }: Props) {
 
   useEffect(() => {
     supabase.from('fuel_entries').select('*').eq('vehicle_id', vehicle.id).order('date', { ascending: false }).then(({ data }) => { if (data) setFuel(data) })
-    supabase.from('maintenance_records').select('*').eq('vehicle_id', vehicle.id).order('date', { ascending: false }).then(({ data }) => { if (data) setMaintenance(data) })
+    supabase.from('repair_entries').select('*').eq('vehicle_id', vehicle.id).order('date', { ascending: false }).then(({ data }) => { if (data) setRepairs(data as RepairEntry[]) })
     supabase.from('issues').select('*').eq('vehicle_id', vehicle.id).order('date', { ascending: false }).then(({ data }) => { if (data) setIssues(data) })
   }, [vehicle.id])
 
@@ -73,7 +73,7 @@ export default function Dashboard({ vehicle }: Props) {
   const avgL100 = validL100.length ? validL100.reduce((a, b) => a + b, 0) / validL100.length : null
 
   const totalFuel = fuel.reduce((s, e) => s + (e.total_cost || 0), 0)
-  const totalMaint = maintenance.reduce((s, r) => s + (r.cost || 0), 0)
+  const totalMaint = repairs.reduce((s, r) => s + (r.total_cost || 0), 0)
   const lastFill = fuel[0]
   const openIssues = issues.filter(i => i.status === 'Open')
 
@@ -81,7 +81,7 @@ export default function Dashboard({ vehicle }: Props) {
     { label: 'Fuel Spent', value: '$' + totalFuel.toFixed(2), sub: `${fuel.length} fillups` },
     { label: 'Avg L/100km', value: avgL100 ? avgL100.toFixed(1) : '—', sub: 'valid fills only' },
     { label: 'Last Fillup', value: lastFill ? fmtDate(lastFill.date) : '—', sub: lastFill?.station || '' },
-    { label: 'Maintenance', value: '$' + totalMaint.toFixed(2), sub: `${maintenance.length} records` },
+    { label: 'Maintenance', value: '$' + totalMaint.toFixed(2), sub: `${repairs.length} visits` },
   ]
 
   const card: React.CSSProperties = { background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 10, padding: '1rem 1.25rem' }

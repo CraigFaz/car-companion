@@ -17,6 +17,16 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v1.3',
+    date: '2026-03-21',
+    notes: [
+      'Maintenance tab rebuilt: repair visits now show individual line items (type, parts, warranty, service intervals)',
+      'Add Visit form supports multiple line items per shop visit',
+      'Service interval badges shown on scheduled maintenance items (↻ Oil Change, Cabin Air Filter, Spark Plugs, etc.)',
+      'Dashboard maintenance stat now sourced from repair_entries',
+    ],
+  },
+  {
     version: 'v1.2',
     date: '2026-03-21',
     notes: [
