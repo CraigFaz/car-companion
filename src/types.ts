@@ -66,6 +66,16 @@ export interface RepairEntry {
   repair_items: RepairItem[]
 }
 
+export interface OilTopup {
+  id: string
+  vehicle_id: string
+  date: string
+  odometer_km: number | null
+  amount_liters: number
+  brand: string | null
+  notes: string | null
+}
+
 export interface Issue {
   id: string
   vehicle_id: string
