@@ -1,4 +1,5 @@
 import Tesseract from 'tesseract.js'
+import heic2any from 'heic2any'
 
 export interface OcrResult {
   date: string
@@ -14,8 +15,21 @@ export interface OdometerResult {
   raw: string
 }
 
-function runOcr(file: File, onProgress?: (pct: number) => void) {
-  return Tesseract.recognize(file, 'eng', {
+/**
+ * Convert HEIC/HEIF files (iPhone default format) to JPEG before OCR,
+ * since browsers cannot decode HEIC natively. Other formats pass through.
+ */
+async function toJpeg(file: File): Promise<File | Blob> {
+  const isHeic = file.type === 'image/heic' || file.type === 'image/heif'
+    || /\.(heic|heif)$/i.test(file.name)
+  if (!isHeic) return file
+  const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 })
+  return Array.isArray(converted) ? converted[0] : converted
+}
+
+async function runOcr(file: File, onProgress?: (pct: number) => void) {
+  const image = await toJpeg(file)
+  return Tesseract.recognize(image, 'eng', {
     logger: (m) => {
       if (m.status === 'recognizing text' && onProgress) {
         onProgress(Math.round(m.progress * 100))
