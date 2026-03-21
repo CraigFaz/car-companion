@@ -12,7 +12,8 @@ function computeL100Map(entries: FuelEntry[]): Map<string, number | null> {
   sorted.forEach((e, i) => {
     if (i === 0) { map.set(e.id, null); return }
     const dist = e.odometer_km - sorted[i - 1].odometer_km
-    map.set(e.id, dist > 0 ? (e.liters / dist) * 100 : null)
+    const liters = e.liters ?? 0
+    map.set(e.id, dist > 0 && liters > 0 ? (liters / dist) * 100 : null)
   })
   return map
 }
@@ -169,7 +170,7 @@ export default function Dashboard({ vehicle }: Props) {
                 <div key={f.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
                   <div>
                     <span style={{ color: 'var(--sub)', fontSize: '0.72rem', marginRight: 8 }}>{fmtDate(f.date)}</span>
-                    {f.liters.toFixed(1)}L · ${f.price_per_liter.toFixed(3)}/L
+                    {f.liters != null ? f.liters.toFixed(1) : '—'}L · ${f.price_per_liter != null ? f.price_per_liter.toFixed(3) : '—'}/L
                   </div>
                   <div style={{ fontFamily: 'DM Mono, monospace', color: 'var(--amber)', fontSize: '0.8rem' }}>
                     ${f.total_cost?.toFixed(2)}
