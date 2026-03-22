@@ -23,6 +23,29 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v2.8',
+    date: '2026-03-22',
+    notes: [
+      'Batch scan: HEIC progress bar now steps forward as each photo finishes converting — real progress, not animated filler',
+      'Drop zone shows "Converting HEIC X / Y" count tied to actual conversion completions',
+    ],
+  },
+  {
+    version: 'v2.7',
+    date: '2026-03-22',
+    notes: [
+      'Batch scan: drop zone now shows "Converting X HEIC photos…" with a note that they process one at a time',
+      'Batch scan: HEIC conversion has a 30s timeout per photo — a stuck conversion no longer blocks the entire queue',
+    ],
+  },
+  {
+    version: 'v2.6',
+    date: '2026-03-22',
+    notes: [
+      'Fixed: batch scan "abort(17)" WASM crash — heic2any conversions now run one at a time to prevent shared heap corruption',
+    ],
+  },
+  {
     version: 'v2.5',
     date: '2026-03-22',
     notes: [
