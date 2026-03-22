@@ -302,6 +302,7 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
   const [existingDates, setExistingDates] = useState<Set<string>>(new Set())
   const [dragOver,      setDragOver]      = useState(false)
   const [saveError,     setSaveError]     = useState<string | null>(null)
+  const [ingesting,     setIngesting]     = useState(0)   // files still being converted/prepared
 
   const itemsRef   = useRef<BatchItem[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -325,27 +326,33 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
     const valid = Array.from(files).filter(f => f.type.startsWith('image/'))
     if (!valid.length) return
 
-    const newItems: BatchItem[] = await Promise.all(valid.map(async file => {
-      const { date, ts } = await readExifDate(file)
-      // HEIC can't be rendered by the browser — convert to JPEG for preview
-      const previewBlob = isHeicFile(file) ? await convertHeicToJpeg(file).catch(() => file) : file
-      return {
-        id: crypto.randomUUID(),
-        file,
-        previewUrl: URL.createObjectURL(previewBlob),
-        exifDate: date,
-        effectiveDate: date,
-        effectiveTs: ts,
-        status: 'pending',
-        imageType: null,
-        result: null,
-        error: null,
-        retryCount: 0,
-      } satisfies BatchItem
-    }))
+    // Show count immediately so user gets feedback before any async work
+    setIngesting(v => v + valid.length)
 
-    itemsRef.current = [...itemsRef.current, ...newItems]
-    setItems([...itemsRef.current])
+    // Process each file individually so items appear as they're ready
+    await Promise.all(valid.map(async file => {
+      try {
+        const { date, ts } = await readExifDate(file)
+        const previewBlob = isHeicFile(file) ? await convertHeicToJpeg(file).catch(() => file) : file
+        const newItem: BatchItem = {
+          id: crypto.randomUUID(),
+          file,
+          previewUrl: URL.createObjectURL(previewBlob),
+          exifDate: date,
+          effectiveDate: date,
+          effectiveTs: ts,
+          status: 'pending',
+          imageType: null,
+          result: null,
+          error: null,
+          retryCount: 0,
+        }
+        itemsRef.current = [...itemsRef.current, newItem]
+        setItems([...itemsRef.current])
+      } finally {
+        setIngesting(v => v - 1)
+      }
+    }))
   }
 
   // ── Queue processing ───────────────────────────────────────────────────────
@@ -506,13 +513,30 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
           >
             <span style={{ fontSize: '2.5rem', lineHeight: 1 }}>📦</span>
             <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>
-              {items.length > 0 ? `${items.length} photo${items.length !== 1 ? 's' : ''} selected` : 'Drop photos here'}
+              {ingesting > 0
+                ? `Preparing ${ingesting} photo${ingesting !== 1 ? 's' : ''}…`
+                : items.length > 0
+                  ? `${items.length} photo${items.length !== 1 ? 's' : ''} ready`
+                  : 'Drop photos here'}
             </div>
             <div style={{ color: 'var(--sub)', fontSize: '0.78rem', textAlign: 'center' }}>
               JPEG, PNG, WEBP, HEIC · Any number · Any order<br />
               Receipt + odometer pairs are matched by photo date
             </div>
-            {items.length === 0 && (
+            {ingesting > 0 && (
+              <div style={{
+                width: '100%', maxWidth: 200, height: 4,
+                background: 'var(--border)', borderRadius: 2, overflow: 'hidden',
+              }}>
+                <div style={{
+                  height: '100%', background: 'var(--amber)', borderRadius: 2,
+                  animation: 'pulse 1s ease-in-out infinite',
+                  width: `${Math.round((1 - ingesting / (items.length + ingesting)) * 100)}%`,
+                  transition: 'width 0.3s',
+                }} />
+              </div>
+            )}
+            {items.length === 0 && ingesting === 0 && (
               <div style={{
                 marginTop: 4, background: 'var(--bg2)', border: '1px solid var(--border)',
                 borderRadius: 6, padding: '6px 18px', fontSize: '0.825rem', color: 'var(--sub)',
@@ -553,17 +577,22 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
             </div>
           )}
 
-          {items.length > 0 && (
+          {(items.length > 0 || ingesting > 0) && (
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
               <button
                 onClick={startScan}
+                disabled={ingesting > 0}
                 style={{
-                  background: 'var(--amber)', color: '#000', border: 'none', borderRadius: 6,
-                  padding: '10px 24px', cursor: 'pointer', fontWeight: 700, fontSize: '0.925rem',
-                  fontFamily: 'Barlow, sans-serif',
+                  background: ingesting > 0 ? 'var(--border)' : 'var(--amber)',
+                  color: ingesting > 0 ? 'var(--sub)' : '#000',
+                  border: 'none', borderRadius: 6,
+                  padding: '10px 24px', cursor: ingesting > 0 ? 'not-allowed' : 'pointer',
+                  fontWeight: 700, fontSize: '0.925rem', fontFamily: 'Barlow, sans-serif',
                 }}
               >
-                Scan {items.length} photo{items.length !== 1 ? 's' : ''} →
+                {ingesting > 0
+                  ? `Preparing ${ingesting} more…`
+                  : `Scan ${items.length} photo${items.length !== 1 ? 's' : ''} →`}
               </button>
               <button
                 onClick={() => { itemsRef.current = []; setItems([]) }}

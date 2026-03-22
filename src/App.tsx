@@ -23,6 +23,15 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v2.5',
+    date: '2026-03-22',
+    notes: [
+      'Batch scan: photos now appear one-by-one as they load — no more UI freeze when dropping many files at once',
+      'Batch scan: drop zone shows "Preparing X photos…" with a progress bar during file ingestion',
+      'Batch scan: Scan button stays disabled and shows remaining count until all files are ready',
+    ],
+  },
+  {
     version: 'v2.4',
     date: '2026-03-22',
     notes: [
