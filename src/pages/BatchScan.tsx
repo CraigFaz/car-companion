@@ -78,15 +78,28 @@ async function readExifDate(file: File): Promise<{ date: string; ts: number }> {
   return fallback
 }
 
+function isHeicFile(file: File) {
+  return file.type === 'image/heic' || file.type === 'image/heif' || /\.(heic|heif)$/i.test(file.name)
+}
+
+async function convertHeicToJpeg(file: File): Promise<Blob> {
+  const { default: heic2any } = await import('heic2any')
+  const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 })
+  return Array.isArray(converted) ? converted[0] : converted
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object' && 'message' in err) return String((err as Record<string, unknown>).message)
+  try { return JSON.stringify(err) } catch { return String(err) }
+}
+
 async function resizeToJpeg(file: File, maxDim = 1600): Promise<{ data: string; mediaType: 'image/jpeg' }> {
   let blob: Blob = file
 
   // Convert HEIC/HEIF (iPhone default format) to JPEG before canvas decoding
-  const isHeic = file.type === 'image/heic' || file.type === 'image/heif' || /\.(heic|heif)$/i.test(file.name)
-  if (isHeic) {
-    const { default: heic2any } = await import('heic2any')
-    const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 })
-    blob = Array.isArray(converted) ? converted[0] : converted
+  if (isHeicFile(file)) {
+    blob = await convertHeicToJpeg(file)
   }
 
   return new Promise((resolve, reject) => {
@@ -314,10 +327,12 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
 
     const newItems: BatchItem[] = await Promise.all(valid.map(async file => {
       const { date, ts } = await readExifDate(file)
+      // HEIC can't be rendered by the browser — convert to JPEG for preview
+      const previewBlob = isHeicFile(file) ? await convertHeicToJpeg(file).catch(() => file) : file
       return {
         id: crypto.randomUUID(),
         file,
-        previewUrl: URL.createObjectURL(file),
+        previewUrl: URL.createObjectURL(previewBlob),
         exifDate: date,
         effectiveDate: date,
         effectiveTs: ts,
@@ -346,7 +361,7 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
         if (attempt === MAX_RETRIES) {
           updateItem(item.id, {
             status: 'error', imageType: null,
-            error: err instanceof Error ? err.message : String(err),
+            error: errorMessage(err),
             retryCount: attempt,
           })
         } else {

@@ -23,6 +23,14 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v2.4',
+    date: '2026-03-22',
+    notes: [
+      'Batch scan: HEIC photos now show correct previews in thumbnails — converted to JPEG at upload time, not just at scan time',
+      'Batch scan: error messages from heic2any and other non-standard throws now display correctly instead of "[object Object]"',
+    ],
+  },
+  {
     version: 'v2.3',
     date: '2026-03-22',
     notes: [
