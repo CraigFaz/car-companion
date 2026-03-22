@@ -127,9 +127,12 @@ async function convertHeicToJpeg(file: File): Promise<Blob> {
     try {
       const { default: heic2any } = await import('heic2any')
       const blob = await Promise.race([
-        heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 }).then(
-          r => (Array.isArray(r) ? r[0] : r) as Blob
-        ),
+        heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 }).then(r => {
+          // Multi-frame HEICs (Live Photo, HDR) return an array — pick the largest
+          // blob which is almost always the main image, not an auxiliary/thumbnail frame.
+          if (Array.isArray(r)) return r.reduce((a, b) => b.size > a.size ? b : a) as Blob
+          return r as Blob
+        }),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('HEIC conversion timed out after 30s')), 30_000)
         ),
@@ -175,7 +178,8 @@ async function resizeToJpeg(file: File, cachedBlob?: Blob, maxDim = 1600): Promi
       log('info', `resizeToJpeg: ${file.name} decoded ${img.naturalWidth}×${img.naturalHeight} → ${w}×${h}`)
       const canvas = document.createElement('canvas')
       canvas.width = w; canvas.height = h
-      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h)
+      const ctx = canvas.getContext('2d', { colorSpace: 'display-p3' }) ?? canvas.getContext('2d')!
+      ctx.drawImage(img, 0, 0, w, h)
       URL.revokeObjectURL(url)
       const b64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1]
       log('info', `resizeToJpeg: ${file.name} encoded ${(b64.length * 0.75 / 1024).toFixed(0)} KB`)

@@ -23,6 +23,15 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v3.3',
+    date: '2026-03-22',
+    notes: [
+      'Batch scan: fixed save failure — added missing flagged and grade columns to fuel_entries database table',
+      'Batch scan: fixed corrupted/pink HEIC images — multi-frame HEICs (Live Photo, HDR) now pick the largest frame instead of index 0, which could be an auxiliary thumbnail or depth map',
+      'Batch scan: improved iPhone photo color accuracy — canvas now renders in Display P3 color space to match iPhone photos',
+    ],
+  },
+  {
     version: 'v3.2',
     date: '2026-03-22',
     notes: [
