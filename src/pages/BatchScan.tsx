@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import type { BatchItem, BatchPair, BatchFlag, AutoScanResult, ScanPrefill } from '../types'
+import HeicWorker from '../workers/heic-worker.ts?worker'
 
 // ── Debug log ─────────────────────────────────────────────────────────────────
 
@@ -120,21 +121,35 @@ async function convertHeicToJpeg(file: File): Promise<Blob> {
   heicListeners.forEach(fn => fn({ queued: 1 }))
   const convert = heicLock.then(async () => {
     log('info', `HEIC convert start: ${file.name}`)
-    const { default: heic2any } = await import('heic2any')
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('HEIC conversion timed out after 30s')), 30_000)
-    )
+    // Each conversion runs in a fresh Worker — its WASM heap is fully isolated.
+    // Terminating the worker after each use means a crash or hang in one file
+    // cannot affect subsequent conversions.
+    const worker = new HeicWorker()
     try {
-      const converted = await Promise.race([
-        heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 }),
-        timeout,
+      const arrayBuffer = await file.arrayBuffer()
+      const blob = await Promise.race([
+        new Promise<Blob>((resolve, reject) => {
+          worker.onmessage = (e: MessageEvent<{ success: boolean; arrayBuffer?: ArrayBuffer; error?: string }>) => {
+            if (e.data.success && e.data.arrayBuffer) {
+              resolve(new Blob([e.data.arrayBuffer], { type: 'image/jpeg' }))
+            } else {
+              reject(new Error(e.data.error ?? 'HEIC conversion failed'))
+            }
+          }
+          // Transfer ownership of the buffer (zero-copy) into the worker
+          worker.postMessage({ arrayBuffer }, [arrayBuffer])
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('HEIC conversion timed out after 30s')), 30_000)
+        ),
       ])
-      const blob = Array.isArray(converted) ? converted[0] : (converted as Blob)
       log('info', `HEIC convert done: ${file.name} → ${(blob.size / 1024).toFixed(0)} KB`)
       return blob
     } catch (err) {
       log('error', `HEIC convert failed: ${file.name} — ${errorMessage(err)}`)
       throw err
+    } finally {
+      worker.terminate()  // always tear down — releases the WASM heap
     }
   }).finally(() => {
     heicListeners.forEach(fn => fn({ done: 1 }))
@@ -216,7 +231,11 @@ async function callAutoScan(file: File, cachedBlob?: Blob): Promise<AutoScanResu
 
   // Otherwise check whether receipt fields were found
   const fields = rData?.fields ?? {}
-  const hasReceiptData = ['volume_l', 'price_per_l', 'total_cost'].some((k: string) => fields[k]?.value != null)
+  // Require ≥2 of 3 key fields — a single matched field (e.g. volume_l alone) is
+  // too weak a signal and causes LED odometer displays to be misclassified as receipts.
+  const receiptFieldCount = (['volume_l', 'price_per_l', 'total_cost'] as const)
+    .filter(k => fields[k]?.value != null).length
+  const hasReceiptData = receiptFieldCount >= 2
   if (hasReceiptData) {
     log('info', `callAutoScan result: ${file.name} → receipt (fields found)`)
     return { imageType: 'receipt', fields }
