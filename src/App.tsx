@@ -23,6 +23,14 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v3.1',
+    date: '2026-03-22',
+    notes: [
+      'Batch scan: fixed HEIC timeout cascade — each conversion now runs in an isolated Web Worker; a corrupted or hung WASM instance cannot stall subsequent files',
+      'Batch scan: fixed odometer misclassification — receipt detection now requires ≥2 of 3 key fields (volume, price/L, total) instead of just 1',
+    ],
+  },
+  {
     version: 'v3.0',
     date: '2026-03-22',
     notes: [
