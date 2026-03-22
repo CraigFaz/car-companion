@@ -23,6 +23,13 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v3.2',
+    date: '2026-03-22',
+    notes: [
+      'Batch scan: fixed HEIC conversion failing with "window is not defined" — heic2any uses browser Canvas APIs and cannot run in a Web Worker; reverted to main-thread conversion with mutex serialization',
+    ],
+  },
+  {
     version: 'v3.1',
     date: '2026-03-22',
     notes: [

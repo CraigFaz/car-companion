@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import type { BatchItem, BatchPair, BatchFlag, AutoScanResult, ScanPrefill } from '../types'
-import HeicWorker from '../workers/heic-worker.ts?worker'
+
 
 // ── Debug log ─────────────────────────────────────────────────────────────────
 
@@ -121,24 +121,15 @@ async function convertHeicToJpeg(file: File): Promise<Blob> {
   heicListeners.forEach(fn => fn({ queued: 1 }))
   const convert = heicLock.then(async () => {
     log('info', `HEIC convert start: ${file.name}`)
-    // Each conversion runs in a fresh Worker — its WASM heap is fully isolated.
-    // Terminating the worker after each use means a crash or hang in one file
-    // cannot affect subsequent conversions.
-    const worker = new HeicWorker()
+    // heic2any uses browser Canvas APIs and must run on the main thread.
+    // Conversions are serialized through heicLock to avoid WASM heap corruption
+    // from concurrent calls.
     try {
-      const arrayBuffer = await file.arrayBuffer()
+      const { default: heic2any } = await import('heic2any')
       const blob = await Promise.race([
-        new Promise<Blob>((resolve, reject) => {
-          worker.onmessage = (e: MessageEvent<{ success: boolean; arrayBuffer?: ArrayBuffer; error?: string }>) => {
-            if (e.data.success && e.data.arrayBuffer) {
-              resolve(new Blob([e.data.arrayBuffer], { type: 'image/jpeg' }))
-            } else {
-              reject(new Error(e.data.error ?? 'HEIC conversion failed'))
-            }
-          }
-          // Transfer ownership of the buffer (zero-copy) into the worker
-          worker.postMessage({ arrayBuffer }, [arrayBuffer])
-        }),
+        heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 }).then(
+          r => (Array.isArray(r) ? r[0] : r) as Blob
+        ),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('HEIC conversion timed out after 30s')), 30_000)
         ),
@@ -148,8 +139,6 @@ async function convertHeicToJpeg(file: File): Promise<Blob> {
     } catch (err) {
       log('error', `HEIC convert failed: ${file.name} — ${errorMessage(err)}`)
       throw err
-    } finally {
-      worker.terminate()  // always tear down — releases the WASM heap
     }
   }).finally(() => {
     heicListeners.forEach(fn => fn({ done: 1 }))
