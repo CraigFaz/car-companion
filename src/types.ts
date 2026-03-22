@@ -91,6 +91,7 @@ export interface BatchItem {
   id: string
   file: File
   previewUrl: string
+  convertedBlob?: Blob        // cached JPEG blob from ingest-time HEIC conversion
   exifDate: string | null
   effectiveDate: string
   effectiveTs: number

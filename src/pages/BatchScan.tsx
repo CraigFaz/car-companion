@@ -149,11 +149,14 @@ function errorMessage(err: unknown): string {
   try { return JSON.stringify(err) } catch { return String(err) }
 }
 
-async function resizeToJpeg(file: File, maxDim = 1600): Promise<{ data: string; mediaType: 'image/jpeg' }> {
+async function resizeToJpeg(file: File, cachedBlob?: Blob, maxDim = 1600): Promise<{ data: string; mediaType: 'image/jpeg' }> {
   let blob: Blob = file
 
-  // Convert HEIC/HEIF (iPhone default format) to JPEG before canvas decoding
-  if (isHeicFile(file)) {
+  if (cachedBlob) {
+    // Reuse the blob from ingest-time conversion — avoids re-running the WASM decoder
+    blob = cachedBlob
+  } else if (isHeicFile(file)) {
+    // Convert HEIC/HEIF (iPhone default format) to JPEG before canvas decoding
     blob = await convertHeicToJpeg(file)
   }
 
@@ -194,9 +197,9 @@ async function invokeWithTimeout(name: string, body: object, timeoutMs = 60_000)
   ])
 }
 
-async function callAutoScan(file: File): Promise<AutoScanResult> {
+async function callAutoScan(file: File, cachedBlob?: Blob): Promise<AutoScanResult> {
   log('info', `callAutoScan start: ${file.name}`)
-  const { data, mediaType } = await resizeToJpeg(file)
+  const { data, mediaType } = await resizeToJpeg(file, cachedBlob)
 
   // Step 1: receipt scan
   log('info', `callAutoScan step1 (receipt): ${file.name}`)
@@ -430,11 +433,13 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
       try {
         const { date, ts } = await readExifDate(file)
         log('info', `ingest: ${file.name} exifDate=${date} size=${(file.size/1024).toFixed(0)}KB type=${file.type||'unknown'} heic=${isHeicFile(file)}`)
-        const previewBlob = isHeicFile(file) ? await convertHeicToJpeg(file).catch(() => file) : file
+        const convertedBlob = isHeicFile(file) ? await convertHeicToJpeg(file).catch(() => null) : null
+        const previewBlob = convertedBlob ?? file
         const newItem: BatchItem = {
           id: crypto.randomUUID(),
           file,
           previewUrl: URL.createObjectURL(previewBlob),
+          ...(convertedBlob ? { convertedBlob } : {}),
           exifDate: date,
           effectiveDate: date,
           effectiveTs: ts,
@@ -459,7 +464,7 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
     updateItem(item.id, { status: 'scanning' })
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const result = await callAutoScan(item.file)
+        const result = await callAutoScan(item.file, item.convertedBlob)
         log('info', `processItem done: ${item.file.name} → ${result.imageType} (attempt ${attempt})`)
         updateItem(item.id, { status: 'done', imageType: result.imageType, result, retryCount: attempt })
         return
