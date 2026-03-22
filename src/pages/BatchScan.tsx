@@ -174,7 +174,7 @@ async function resizeToJpeg(file: File, maxDim = 1600): Promise<{ data: string; 
       log('info', `resizeToJpeg: ${file.name} encoded ${(b64.length * 0.75 / 1024).toFixed(0)} KB`)
       resolve({ data: b64, mediaType: 'image/jpeg' })
     }
-    img.onerror = (e) => {
+    img.onerror = (_e) => {
       URL.revokeObjectURL(url)
       log('error', `resizeToJpeg: ${file.name} img.onerror — blob type=${blob.type} size=${blob.size}`)
       reject(new Error('Cannot decode image'))
