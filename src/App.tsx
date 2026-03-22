@@ -23,6 +23,14 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v2.9',
+    date: '2026-03-22',
+    notes: [
+      'Batch scan: added full debug log downloadable from scanning phase — logs every step from ingest through HEIC convert, resize, and each edge function call',
+      'Batch scan: fixed stuck scan — supabase.functions.invoke now has a 60s hard timeout per call so a hung edge function no longer freezes the queue',
+    ],
+  },
+  {
     version: 'v2.8',
     date: '2026-03-22',
     notes: [
