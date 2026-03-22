@@ -78,9 +78,19 @@ async function readExifDate(file: File): Promise<{ date: string; ts: number }> {
   return fallback
 }
 
-function resizeToJpeg(file: File, maxDim = 1600): Promise<{ data: string; mediaType: 'image/jpeg' }> {
+async function resizeToJpeg(file: File, maxDim = 1600): Promise<{ data: string; mediaType: 'image/jpeg' }> {
+  let blob: Blob = file
+
+  // Convert HEIC/HEIF (iPhone default format) to JPEG before canvas decoding
+  const isHeic = file.type === 'image/heic' || file.type === 'image/heif' || /\.(heic|heif)$/i.test(file.name)
+  if (isHeic) {
+    const { default: heic2any } = await import('heic2any')
+    const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 })
+    blob = Array.isArray(converted) ? converted[0] : converted
+  }
+
   return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file)
+    const url = URL.createObjectURL(blob)
     const img = new Image()
     img.onload = () => {
       const ratio = Math.min(maxDim / img.naturalWidth, maxDim / img.naturalHeight, 1)
@@ -92,7 +102,7 @@ function resizeToJpeg(file: File, maxDim = 1600): Promise<{ data: string; mediaT
       URL.revokeObjectURL(url)
       resolve({ data: canvas.toDataURL('image/jpeg', 0.92).split(',')[1], mediaType: 'image/jpeg' })
     }
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Cannot decode image — use JPEG, PNG, or WEBP (not HEIC)')) }
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Cannot decode image')) }
     img.src = url
   })
 }
@@ -484,7 +494,7 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
               {items.length > 0 ? `${items.length} photo${items.length !== 1 ? 's' : ''} selected` : 'Drop photos here'}
             </div>
             <div style={{ color: 'var(--sub)', fontSize: '0.78rem', textAlign: 'center' }}>
-              JPEG, PNG, WEBP · Any number · Any order<br />
+              JPEG, PNG, WEBP, HEIC · Any number · Any order<br />
               Receipt + odometer pairs are matched by photo date
             </div>
             {items.length === 0 && (
@@ -498,7 +508,7 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
           </div>
           <input
             ref={fileInputRef} type="file" multiple
-            accept="image/jpeg,image/png,image/webp"
+            accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
             style={{ display: 'none' }}
             onChange={e => { if (e.target.files) handleFiles(e.target.files); e.target.value = '' }}
           />
