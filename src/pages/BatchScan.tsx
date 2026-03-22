@@ -2,6 +2,31 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import type { BatchItem, BatchPair, BatchFlag, AutoScanResult, ScanPrefill } from '../types'
 
+// ── Debug log ─────────────────────────────────────────────────────────────────
+
+type LogLevel = 'info' | 'warn' | 'error'
+type LogEntry  = { ts: string; level: LogLevel; msg: string }
+const sessionLog: LogEntry[] = []
+
+function log(level: LogLevel, msg: string) {
+  const ts = new Date().toISOString().slice(11, 23) // HH:MM:SS.mmm
+  sessionLog.push({ ts, level, msg })
+  if (level === 'error') console.error(`[Batch ${ts}] ${msg}`)
+  else if (level === 'warn') console.warn(`[Batch ${ts}] ${msg}`)
+  else console.log(`[Batch ${ts}] ${msg}`)
+}
+
+function downloadLog() {
+  const lines = sessionLog.map(e => `[${e.ts}] [${e.level.toUpperCase().padEnd(5)}] ${e.msg}`)
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href = url
+  a.download = `batch-scan-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.log`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const CONCURRENCY = 2
@@ -91,17 +116,26 @@ type HeicEvent = { queued: 1 } | { done: 1 }
 const heicListeners: Array<(e: HeicEvent) => void> = []
 
 async function convertHeicToJpeg(file: File): Promise<Blob> {
+  log('info', `HEIC queued: ${file.name} (${(file.size / 1024).toFixed(0)} KB)`)
   heicListeners.forEach(fn => fn({ queued: 1 }))
   const convert = heicLock.then(async () => {
+    log('info', `HEIC convert start: ${file.name}`)
     const { default: heic2any } = await import('heic2any')
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('HEIC conversion timed out after 30s')), 30_000)
     )
-    const converted = await Promise.race([
-      heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 }),
-      timeout,
-    ])
-    return Array.isArray(converted) ? converted[0] : (converted as Blob)
+    try {
+      const converted = await Promise.race([
+        heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 }),
+        timeout,
+      ])
+      const blob = Array.isArray(converted) ? converted[0] : (converted as Blob)
+      log('info', `HEIC convert done: ${file.name} → ${(blob.size / 1024).toFixed(0)} KB`)
+      return blob
+    } catch (err) {
+      log('error', `HEIC convert failed: ${file.name} — ${errorMessage(err)}`)
+      throw err
+    }
   }).finally(() => {
     heicListeners.forEach(fn => fn({ done: 1 }))
   })
@@ -123,6 +157,7 @@ async function resizeToJpeg(file: File, maxDim = 1600): Promise<{ data: string; 
     blob = await convertHeicToJpeg(file)
   }
 
+  log('info', `resizeToJpeg: ${file.name} (type=${blob.type || 'unknown'} size=${(blob.size/1024).toFixed(0)}KB)`)
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(blob)
     const img = new Image()
@@ -130,44 +165,73 @@ async function resizeToJpeg(file: File, maxDim = 1600): Promise<{ data: string; 
       const ratio = Math.min(maxDim / img.naturalWidth, maxDim / img.naturalHeight, 1)
       const w = Math.round(img.naturalWidth * ratio)
       const h = Math.round(img.naturalHeight * ratio)
+      log('info', `resizeToJpeg: ${file.name} decoded ${img.naturalWidth}×${img.naturalHeight} → ${w}×${h}`)
       const canvas = document.createElement('canvas')
       canvas.width = w; canvas.height = h
       canvas.getContext('2d')!.drawImage(img, 0, 0, w, h)
       URL.revokeObjectURL(url)
-      resolve({ data: canvas.toDataURL('image/jpeg', 0.92).split(',')[1], mediaType: 'image/jpeg' })
+      const b64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1]
+      log('info', `resizeToJpeg: ${file.name} encoded ${(b64.length * 0.75 / 1024).toFixed(0)} KB`)
+      resolve({ data: b64, mediaType: 'image/jpeg' })
     }
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Cannot decode image')) }
+    img.onerror = (_e) => {
+      URL.revokeObjectURL(url)
+      log('error', `resizeToJpeg: ${file.name} img.onerror — blob type=${blob.type} size=${blob.size}`)
+      reject(new Error('Cannot decode image'))
+    }
     img.src = url
   })
 }
 
+/** Wraps supabase.functions.invoke with a hard timeout so a hung edge call doesn't freeze the queue. */
+async function invokeWithTimeout(name: string, body: object, timeoutMs = 60_000) {
+  const timeoutErr = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(`Edge function timed out after ${timeoutMs / 1000}s`)), timeoutMs)
+  )
+  return Promise.race([
+    supabase.functions.invoke(name, { body }),
+    timeoutErr,
+  ])
+}
+
 async function callAutoScan(file: File): Promise<AutoScanResult> {
+  log('info', `callAutoScan start: ${file.name}`)
   const { data, mediaType } = await resizeToJpeg(file)
 
   // Step 1: receipt scan
-  const { data: rData, error: rErr } = await supabase.functions.invoke('scan-receipt', {
-    body: { image: data, mediaType, type: 'receipt' },
-  })
+  log('info', `callAutoScan step1 (receipt): ${file.name}`)
+  const { data: rData, error: rErr } = await invokeWithTimeout('scan-receipt', { image: data, mediaType, type: 'receipt' })
+  log('info', `callAutoScan step1 response: ${file.name} — rErr=${rErr?.message ?? 'none'} imageType=${rData?.imageType ?? 'n/a'} error=${rData?.error ?? 'none'}`)
   if (rErr) throw new Error(rErr.message ?? 'Edge function error')
   if (rData?.error) throw new Error(rData.error)
 
   // If the edge function already returned a classified imageType (new auto mode), use it directly
-  if (rData?.imageType) return rData as AutoScanResult
+  if (rData?.imageType) {
+    log('info', `callAutoScan result: ${file.name} → ${rData.imageType} (auto-classified)`)
+    return rData as AutoScanResult
+  }
 
   // Otherwise check whether receipt fields were found
   const fields = rData?.fields ?? {}
   const hasReceiptData = ['volume_l', 'price_per_l', 'total_cost'].some((k: string) => fields[k]?.value != null)
-  if (hasReceiptData) return { imageType: 'receipt', fields }
+  if (hasReceiptData) {
+    log('info', `callAutoScan result: ${file.name} → receipt (fields found)`)
+    return { imageType: 'receipt', fields }
+  }
 
   // Step 2: no receipt data — try odometer
-  const { data: oData, error: oErr } = await supabase.functions.invoke('scan-receipt', {
-    body: { image: data, mediaType, type: 'odometer' },
-  })
+  log('info', `callAutoScan step2 (odometer): ${file.name}`)
+  const { data: oData, error: oErr } = await invokeWithTimeout('scan-receipt', { image: data, mediaType, type: 'odometer' })
+  log('info', `callAutoScan step2 response: ${file.name} — oErr=${oErr?.message ?? 'none'} odometer=${oData?.odometer_km?.value ?? 'n/a'} error=${oData?.error ?? 'none'}`)
   if (oErr) throw new Error(oErr.message ?? 'Edge function error')
   if (oData?.error) throw new Error(oData.error)
 
-  if (oData?.odometer_km?.value != null) return { imageType: 'odometer', odometer_km: oData.odometer_km }
+  if (oData?.odometer_km?.value != null) {
+    log('info', `callAutoScan result: ${file.name} → odometer ${oData.odometer_km.value}`)
+    return { imageType: 'odometer', odometer_km: oData.odometer_km }
+  }
 
+  log('warn', `callAutoScan result: ${file.name} → unknown (no fields matched)`)
   return { imageType: 'unknown', reason: 'Image not recognized as a fuel receipt or odometer' }
 }
 
@@ -356,6 +420,7 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
   async function handleFiles(files: FileList | File[]) {
     const valid = Array.from(files).filter(f => f.type.startsWith('image/'))
     if (!valid.length) return
+    log('info', `handleFiles: ${valid.length} files dropped (${valid.map(f => `${f.name}[${f.type||'?'}]`).join(', ')})`)
 
     // Show count immediately so user gets feedback before any async work
     setIngesting(v => v + valid.length)
@@ -364,6 +429,7 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
     await Promise.all(valid.map(async file => {
       try {
         const { date, ts } = await readExifDate(file)
+        log('info', `ingest: ${file.name} exifDate=${date} size=${(file.size/1024).toFixed(0)}KB type=${file.type||'unknown'} heic=${isHeicFile(file)}`)
         const previewBlob = isHeicFile(file) ? await convertHeicToJpeg(file).catch(() => file) : file
         const newItem: BatchItem = {
           id: crypto.randomUUID(),
@@ -389,21 +455,25 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
   // ── Queue processing ───────────────────────────────────────────────────────
 
   async function processItem(item: BatchItem) {
+    log('info', `processItem start: ${item.file.name}`)
     updateItem(item.id, { status: 'scanning' })
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         const result = await callAutoScan(item.file)
+        log('info', `processItem done: ${item.file.name} → ${result.imageType} (attempt ${attempt})`)
         updateItem(item.id, { status: 'done', imageType: result.imageType, result, retryCount: attempt })
         return
       } catch (err) {
+        const msg = errorMessage(err)
         if (attempt === MAX_RETRIES) {
+          log('error', `processItem failed: ${item.file.name} — ${msg} (no more retries)`)
           updateItem(item.id, {
             status: 'error', imageType: null,
-            error: errorMessage(err),
+            error: msg,
             retryCount: attempt,
           })
         } else {
-          // Brief pause before retry
+          log('warn', `processItem retry: ${item.file.name} — ${msg} (attempt ${attempt}, retrying in 1.5s)`)
           await new Promise(r => setTimeout(r, 1500))
         }
       }
@@ -412,6 +482,7 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
 
   async function startScan() {
     if (!itemsRef.current.length) return
+    log('info', `startScan: ${itemsRef.current.length} items, concurrency=${CONCURRENCY}`)
     setPhase('scanning')
 
     const pending = [...itemsRef.current]
@@ -420,16 +491,19 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
     await new Promise<void>(resolve => {
       let active = 0
       function dispatch() {
-        if (idx >= pending.length && active === 0) { resolve(); return }
+        log('info', `dispatch: idx=${idx}/${pending.length} active=${active}`)
+        if (idx >= pending.length && active === 0) { log('info', 'dispatch: all done, resolving'); resolve(); return }
         while (active < CONCURRENCY && idx < pending.length) {
           const item = pending[idx++]
           active++
-          processItem(item).finally(() => { active--; dispatch() })
+          log('info', `dispatch: launching ${item.file.name} (slot ${active}/${CONCURRENCY})`)
+          processItem(item).finally(() => { active--; log('info', `dispatch: slot freed, active now ${active}`); dispatch() })
         }
       }
       dispatch()
     })
 
+    log('info', `startScan: complete`)
     setScanDone(true)
     // Don't auto-advance — let user review errors on thumbnails before proceeding
   }
@@ -714,6 +788,16 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
               Processing {CONCURRENCY} at a time. Failed scans retry once automatically.
             </div>
           )}
+          <button
+            onClick={downloadLog}
+            style={{
+              alignSelf: 'flex-start', background: 'transparent', color: 'var(--sub)',
+              border: '1px solid var(--border)', borderRadius: 6, padding: '5px 12px',
+              cursor: 'pointer', fontSize: '0.75rem', fontFamily: 'Barlow, sans-serif',
+            }}
+          >
+            ↓ Download debug log
+          </button>
 
           {/* Scan complete summary — stays visible until user advances */}
           {scanDone && (() => {
