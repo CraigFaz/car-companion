@@ -78,6 +78,52 @@ export interface OilTopup {
   notes: string | null
 }
 
+// ── Batch scan ────────────────────────────────────────────────────────────────
+
+export interface AutoScanResult {
+  imageType: 'receipt' | 'odometer' | 'unknown'
+  fields?: Record<string, { value: string | number | null; confidence: 'high' | 'medium' | 'low' }>
+  odometer_km?: { value: number | null; confidence: 'high' | 'medium' | 'low' }
+  reason?: string
+}
+
+export interface BatchItem {
+  id: string
+  file: File
+  previewUrl: string
+  exifDate: string | null
+  effectiveDate: string
+  effectiveTs: number
+  status: 'pending' | 'scanning' | 'done' | 'error'
+  imageType: 'receipt' | 'odometer' | 'unknown' | null
+  result: AutoScanResult | null
+  error: string | null
+  retryCount: number
+}
+
+export type BatchFlag =
+  | 'unpaired_receipt'
+  | 'unpaired_odometer'
+  | 'missing_fields'
+  | 'low_confidence'
+  | 'math_mismatch'
+  | 'scan_failed'
+  | 'multi_image_day'
+  | 'not_fuel_photo'
+  | 'possible_duplicate'
+
+export interface BatchPair {
+  id: string
+  date: string
+  receipt: BatchItem | null
+  odometer: BatchItem | null
+  extras: BatchItem[]
+  flags: BatchFlag[]
+  prefill: Partial<ScanPrefill>
+  reviewStatus: 'needs_review' | 'approved' | 'skipped'
+  editedPrefill: Partial<ScanPrefill>
+}
+
 export interface ScanPrefill {
   date?: string
   station?: string

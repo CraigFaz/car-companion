@@ -7,8 +7,9 @@ import Maintenance from './pages/Maintenance'
 import Issues from './pages/Issues'
 import OilTopups from './pages/OilTopups'
 import ScanReceipt from './pages/ScanReceipt'
+import BatchScan from './pages/BatchScan'
 
-type Tab = 'dashboard' | 'fuel' | 'maintenance' | 'issues' | 'oil' | 'scan'
+type Tab = 'dashboard' | 'fuel' | 'maintenance' | 'issues' | 'oil' | 'scan' | 'batch'
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'dashboard',   label: 'Dashboard',   icon: '⊞' },
@@ -17,9 +18,23 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'issues',      label: 'Issues',       icon: '⚠' },
   { id: 'oil',         label: 'Oil',          icon: '🛢' },
   { id: 'scan',        label: 'Scan',         icon: '📷' },
+  { id: 'batch',       label: 'Batch',        icon: '📦' },
 ]
 
 const CHANGELOG = [
+  {
+    version: 'v2.2',
+    date: '2026-03-22',
+    notes: [
+      'New Batch tab: drop any number of fuel-up photos at once for historical import',
+      'EXIF date metadata auto-pairs receipt + odometer photos taken the same day — upload order does not matter',
+      'Queue processor: max 2 concurrent Claude vision scans, failed scans retry once automatically',
+      'Auto-classification: single API call per image — Claude identifies receipt, odometer, or unrecognized photo',
+      'Flags questionable pairs: unpaired photo, missing fields, low confidence, math mismatch, duplicate date, unrecognized image',
+      'Review section: editable fields per pair before saving, approve or skip individually',
+      'Batch save writes all approved pairs to fuel_entries with ocr_raw and ocr_meta stored',
+    ],
+  },
   {
     version: 'v2.1',
     date: '2026-03-21',
@@ -175,6 +190,7 @@ export default function App() {
         {vehicle && tab === 'issues'      && <Issues vehicleId={vehicle.id} />}
         {vehicle && tab === 'oil'         && <OilTopups vehicleId={vehicle.id} />}
         {vehicle && tab === 'scan'        && <ScanReceipt onUseScan={handleUseScan} />}
+        {vehicle && tab === 'batch'       && <BatchScan vehicleId={vehicle.id} onSaved={() => setTab('fuel')} />}
       </main>
 
       {/* Mobile bottom nav */}

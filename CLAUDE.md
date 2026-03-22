@@ -32,18 +32,27 @@ Push directly to `main`. No PRs, no feature branches — changes deploy to produ
 | `docs/craig-fusion-data-v3.json` | Craig's historical data — 16 fillups, 3 repairs, 5 issues |
 | `docs/car-companion-handoff.docx` | Full design spec from prototype handoff |
 
-## What's Been Built (as of v1.3)
+## What's Been Built (as of v2.2)
 
 - React + Vite + TypeScript + Tailwind + Recharts + Supabase
-- Dashboard: stats cards, L/100km chart, recent fillups, open issues
+- Dashboard: stats cards, L/100km chart, recent fillups, open issues, service due alerts
 - Fuel log: list, chart, add form with any-two-of-three math, grade field, flagged entries
 - Maintenance: repair visits with line items, type badges, warranty, service interval reminders
 - Issues: severity colour coding, open/resolved status
+- Oil top-ups: dedicated tab, date/amount/brand/odometer tracking
+- Scan tab: single-receipt + odometer photo scan via Claude vision (either photo first)
+- Batch tab: multi-photo historical import with EXIF pairing, queue processing, flagging, review
+
+## Roadmap (completed)
+
+- [x] **Maintenance alerts** on Dashboard from repair_items interval tracking
+- [x] **Oil top-up log** — `oil_topups` table + Oil tab
+- [x] **OCR receipt scanning** — Claude vision via Supabase edge function (replaced Tesseract.js)
 
 ## Roadmap (next priorities)
 
-1. **Maintenance alerts** on Dashboard from repair_items interval tracking (P2)
-2. **Oil top-up log** — `oil_topups` table + tab or section (P3)
-3. **OCR receipt scanning** — Tesseract.js for fuel receipts (P3)
+1. **Batch scan persistence** — save review queue to Supabase so it survives a page refresh (P2)
+2. **Insurance / registration** — new doc types in the scan pipeline (P3)
+3. **Export** — CSV download of fuel entries and maintenance records (P3)
 
 See `docs/car-companion-handoff.docx` for full spec, schema, UI conventions, and lessons learned.
