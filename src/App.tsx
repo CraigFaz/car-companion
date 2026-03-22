@@ -23,6 +23,13 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v3.0',
+    date: '2026-03-22',
+    notes: [
+      'Batch scan: fixed HEIC abort() crashes — converted blob is now cached at ingest time so the HEIC WASM decoder only runs once per file, eliminating abort(12/14/17) errors during scanning',
+    ],
+  },
+  {
     version: 'v2.9',
     date: '2026-03-22',
     notes: [
