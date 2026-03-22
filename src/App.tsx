@@ -23,6 +23,14 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v2.7',
+    date: '2026-03-22',
+    notes: [
+      'Batch scan: drop zone now shows "Converting X HEIC photos…" with a note that they process one at a time',
+      'Batch scan: HEIC conversion has a 30s timeout per photo — a stuck conversion no longer blocks the entire queue',
+    ],
+  },
+  {
     version: 'v2.6',
     date: '2026-03-22',
     notes: [

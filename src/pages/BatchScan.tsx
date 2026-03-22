@@ -85,14 +85,25 @@ function isHeicFile(file: File) {
 // heic2any compiles libheif to WASM with a shared heap — concurrent calls cause abort(17) crashes.
 // All conversions are chained through this lock so only one runs at a time.
 let heicLock = Promise.resolve<void>(undefined)
+// Callbacks registered by the component to track conversion progress
+const heicProgressListeners: Array<(delta: number) => void> = []
 
 async function convertHeicToJpeg(file: File): Promise<Blob> {
   const convert = heicLock.then(async () => {
     const { default: heic2any } = await import('heic2any')
-    const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 })
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('HEIC conversion timed out after 30s')), 30_000)
+    )
+    const converted = await Promise.race([
+      heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 }),
+      timeout,
+    ])
     return Array.isArray(converted) ? converted[0] : (converted as Blob)
+  }).finally(() => {
+    heicProgressListeners.forEach(fn => fn(-1))
   })
   heicLock = convert.then(() => {}, () => {})  // advance lock regardless of success/failure
+  heicProgressListeners.forEach(fn => fn(+1))
   return convert
 }
 
@@ -311,6 +322,7 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
   const [dragOver,      setDragOver]      = useState(false)
   const [saveError,     setSaveError]     = useState<string | null>(null)
   const [ingesting,     setIngesting]     = useState(0)   // files still being converted/prepared
+  const [heicConverting, setHeicConverting] = useState(0) // HEIC conversions currently in the queue
 
   const itemsRef   = useRef<BatchItem[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -320,6 +332,13 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
     supabase.from('fuel_entries').select('date').eq('vehicle_id', vehicleId)
       .then(({ data }) => { if (data) setExistingDates(new Set(data.map(e => e.date))) })
   }, [vehicleId])
+
+  // Track HEIC conversion queue depth for progress display
+  useEffect(() => {
+    const listener = (delta: number) => setHeicConverting(v => Math.max(0, v + delta))
+    heicProgressListeners.push(listener)
+    return () => { const i = heicProgressListeners.indexOf(listener); if (i >= 0) heicProgressListeners.splice(i, 1) }
+  }, [])
 
   // ── Item state helper ──────────────────────────────────────────────────────
 
@@ -522,7 +541,9 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
             <span style={{ fontSize: '2.5rem', lineHeight: 1 }}>📦</span>
             <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>
               {ingesting > 0
-                ? `Preparing ${ingesting} photo${ingesting !== 1 ? 's' : ''}…`
+                ? heicConverting > 0
+                  ? `Converting ${heicConverting} HEIC photo${heicConverting !== 1 ? 's' : ''}…`
+                  : `Preparing ${ingesting} photo${ingesting !== 1 ? 's' : ''}…`
                 : items.length > 0
                   ? `${items.length} photo${items.length !== 1 ? 's' : ''} ready`
                   : 'Drop photos here'}
@@ -531,6 +552,11 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
               JPEG, PNG, WEBP, HEIC · Any number · Any order<br />
               Receipt + odometer pairs are matched by photo date
             </div>
+            {heicConverting > 0 && (
+              <div style={{ fontSize: '0.7rem', color: 'var(--sub)', textAlign: 'center' }}>
+                HEIC photos convert one at a time — this may take a moment
+              </div>
+            )}
             {ingesting > 0 && (
               <div style={{
                 width: '100%', maxWidth: 200, height: 4,
