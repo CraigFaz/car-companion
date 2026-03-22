@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import exifr from 'exifr'
 import { supabase } from '../lib/supabase'
 import type { BatchItem, BatchPair, BatchFlag, AutoScanResult, ScanPrefill } from '../types'
 
@@ -23,16 +22,60 @@ const FLAG_META: Record<BatchFlag, { label: string; color: string }> = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/** Inline JPEG EXIF reader — no external dependency. Reads first 128 KB only. */
 async function readExifDate(file: File): Promise<{ date: string; ts: number }> {
+  const fallback = { date: new Date(file.lastModified).toISOString().slice(0, 10), ts: file.lastModified }
+  const isJpeg = file.type === 'image/jpeg' || /\.jpe?g$/i.test(file.name)
+  if (!isJpeg) return fallback
   try {
-    const exif = await exifr.parse(file, ['DateTimeOriginal', 'DateTime'])
-    const dt = exif?.DateTimeOriginal ?? exif?.DateTime
-    if (dt instanceof Date && !isNaN(dt.getTime())) {
-      return { date: dt.toISOString().slice(0, 10), ts: dt.getTime() }
+    const buf  = await file.slice(0, 131072).arrayBuffer()
+    const view = new DataView(buf)
+    if (view.byteLength < 4 || view.getUint16(0) !== 0xFFD8) return fallback
+    let off = 2
+    while (off + 4 <= view.byteLength) {
+      const marker = view.getUint16(off)
+      const segLen = view.getUint16(off + 2)
+      if (marker === 0xFFE1 && segLen > 6) {
+        const sig = String.fromCharCode(view.getUint8(off+4), view.getUint8(off+5), view.getUint8(off+6), view.getUint8(off+7))
+        if (sig === 'Exif') {
+          const tiffBase = off + 10
+          const le   = view.getUint16(tiffBase) === 0x4949
+          const ifd0 = tiffBase + view.getUint32(tiffBase + 4, le)
+          const n    = view.getUint16(ifd0, le)
+          for (let i = 0; i < n; i++) {
+            const e = ifd0 + 2 + i * 12
+            if (e + 12 > view.byteLength) break
+            if (view.getUint16(e, le) === 0x8769) {           // ExifIFD pointer
+              const exifBase = tiffBase + view.getUint32(e + 8, le)
+              const ne = view.getUint16(exifBase, le)
+              for (let j = 0; j < ne; j++) {
+                const ef = exifBase + 2 + j * 12
+                if (ef + 12 > view.byteLength) break
+                const tag = view.getUint16(ef, le)
+                if (tag === 0x9003 || tag === 0x9004) {        // DateTimeOriginal / Digitized
+                  const vOff = tiffBase + view.getUint32(ef + 8, le)
+                  let s = ''
+                  for (let k = 0; k < 19 && vOff + k < view.byteLength; k++) {
+                    const c = view.getUint8(vOff + k)
+                    if (c === 0) break
+                    s += String.fromCharCode(c)
+                  }
+                  if (s.length >= 10) {
+                    const date = s.slice(0,4) + '-' + s.slice(5,7) + '-' + s.slice(8,10)
+                    const dt   = new Date(date + 'T' + (s.length >= 19 ? s.slice(11) : '00:00:00'))
+                    if (!isNaN(dt.getTime())) return { date, ts: dt.getTime() }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      if (segLen < 2) break
+      off += 2 + segLen
     }
-  } catch { /* no exif or unreadable */ }
-  const ts = file.lastModified
-  return { date: new Date(ts).toISOString().slice(0, 10), ts }
+  } catch { /* ignore parse errors */ }
+  return fallback
 }
 
 function resizeToJpeg(file: File, maxDim = 1600): Promise<{ data: string; mediaType: 'image/jpeg' }> {
@@ -56,12 +99,32 @@ function resizeToJpeg(file: File, maxDim = 1600): Promise<{ data: string; mediaT
 
 async function callAutoScan(file: File): Promise<AutoScanResult> {
   const { data, mediaType } = await resizeToJpeg(file)
-  const { data: result, error } = await supabase.functions.invoke('scan-receipt', {
-    body: { image: data, mediaType, type: 'auto' },
+
+  // Step 1: receipt scan
+  const { data: rData, error: rErr } = await supabase.functions.invoke('scan-receipt', {
+    body: { image: data, mediaType, type: 'receipt' },
   })
-  if (error) throw new Error(error.message ?? 'Edge function error')
-  if (result?.error) throw new Error(result.error)
-  return result as AutoScanResult
+  if (rErr) throw new Error(rErr.message ?? 'Edge function error')
+  if (rData?.error) throw new Error(rData.error)
+
+  // If the edge function already returned a classified imageType (new auto mode), use it directly
+  if (rData?.imageType) return rData as AutoScanResult
+
+  // Otherwise check whether receipt fields were found
+  const fields = rData?.fields ?? {}
+  const hasReceiptData = ['volume_l', 'price_per_l', 'total_cost'].some((k: string) => fields[k]?.value != null)
+  if (hasReceiptData) return { imageType: 'receipt', fields }
+
+  // Step 2: no receipt data — try odometer
+  const { data: oData, error: oErr } = await supabase.functions.invoke('scan-receipt', {
+    body: { image: data, mediaType, type: 'odometer' },
+  })
+  if (oErr) throw new Error(oErr.message ?? 'Edge function error')
+  if (oData?.error) throw new Error(oData.error)
+
+  if (oData?.odometer_km?.value != null) return { imageType: 'odometer', odometer_km: oData.odometer_km }
+
+  return { imageType: 'unknown', reason: 'Image not recognized as a fuel receipt or odometer' }
 }
 
 function buildPairs(items: BatchItem[], existingDates: Set<string>): BatchPair[] {
@@ -492,18 +555,31 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
           <div style={card}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: 8 }}>
               {items.map(item => (
-                <div key={item.id} style={{ position: 'relative' }}>
+                <div key={item.id} style={{ position: 'relative' }} title={item.error ?? undefined}>
                   <img
                     src={item.previewUrl}
                     alt=""
                     style={{
                       width: '100%', aspectRatio: '1', objectFit: 'cover', borderRadius: 6, display: 'block',
                       opacity: item.status === 'pending' ? 0.45 : 1, transition: 'opacity 0.2s',
+                      outline: item.status === 'error' ? '2px solid #ef4444' : 'none',
                     }}
                   />
                   <div style={{ position: 'absolute', bottom: 4, left: 4 }}>
                     <StatusPill item={item} />
                   </div>
+                  {item.status === 'error' && item.error && (
+                    <div style={{
+                      position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                      background: 'rgba(0,0,0,0.6)', borderRadius: 6,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      padding: 4,
+                    }}>
+                      <span style={{ fontSize: '0.55rem', color: '#fca5a5', textAlign: 'center', wordBreak: 'break-word' }}>
+                        {item.error.slice(0, 60)}
+                      </span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
