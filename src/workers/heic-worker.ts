@@ -8,7 +8,7 @@ self.onmessage = async (event: MessageEvent<{ arrayBuffer: ArrayBuffer }>) => {
     const converted = await heic2any({ blob, toType: 'image/jpeg', quality: 0.85 })
     const result = Array.isArray(converted) ? converted[0] : (converted as Blob)
     const resultBuffer = await result.arrayBuffer()
-    self.postMessage({ success: true, arrayBuffer: resultBuffer }, [resultBuffer])
+    self.postMessage({ success: true, arrayBuffer: resultBuffer }, { transfer: [resultBuffer] })
   } catch (err) {
     self.postMessage({ success: false, error: err instanceof Error ? err.message : String(err) })
   }
