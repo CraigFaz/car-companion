@@ -23,6 +23,13 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v2.6',
+    date: '2026-03-22',
+    notes: [
+      'Fixed: batch scan "abort(17)" WASM crash — heic2any conversions now run one at a time to prevent shared heap corruption',
+    ],
+  },
+  {
     version: 'v2.5',
     date: '2026-03-22',
     notes: [

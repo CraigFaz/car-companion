@@ -82,10 +82,18 @@ function isHeicFile(file: File) {
   return file.type === 'image/heic' || file.type === 'image/heif' || /\.(heic|heif)$/i.test(file.name)
 }
 
+// heic2any compiles libheif to WASM with a shared heap — concurrent calls cause abort(17) crashes.
+// All conversions are chained through this lock so only one runs at a time.
+let heicLock = Promise.resolve<void>(undefined)
+
 async function convertHeicToJpeg(file: File): Promise<Blob> {
-  const { default: heic2any } = await import('heic2any')
-  const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 })
-  return Array.isArray(converted) ? converted[0] : converted
+  const convert = heicLock.then(async () => {
+    const { default: heic2any } = await import('heic2any')
+    const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 })
+    return Array.isArray(converted) ? converted[0] : (converted as Blob)
+  })
+  heicLock = convert.then(() => {}, () => {})  // advance lock regardless of success/failure
+  return convert
 }
 
 function errorMessage(err: unknown): string {
