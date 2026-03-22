@@ -50,6 +50,43 @@ Rules:
 - if you see both km and mi displays, use km
 - confidence: high = clearly readable, medium = partially obscured, low = guessing`
 
+const AUTO_SYSTEM = `You analyze vehicle fuel-up photos. Return only valid JSON — no markdown, no explanation.`
+
+const AUTO_PROMPT = `Look at this image and classify it, then extract the relevant data.
+
+If it is a fuel receipt or invoice, return ONLY:
+{
+  "imageType": "receipt",
+  "fields": {
+    "date":        {"value": "YYYY-MM-DD or null", "confidence": "high|medium|low"},
+    "station":     {"value": "station name or null", "confidence": "high|medium|low"},
+    "grade":       {"value": "Regular 87|Plus 89|Premium 91|Premium 93 or null", "confidence": "high|medium|low"},
+    "volume_l":    {"value": numeric_or_null, "confidence": "high|medium|low"},
+    "price_per_l": {"value": numeric_or_null, "confidence": "high|medium|low"},
+    "total_cost":  {"value": numeric_or_null, "confidence": "high|medium|low"},
+    "odometer_km": {"value": numeric_or_null, "confidence": "high|medium|low"}
+  }
+}
+
+If it is a vehicle dashboard or odometer display, return ONLY:
+{
+  "imageType": "odometer",
+  "odometer_km": {"value": 145230, "confidence": "high|medium|low"}
+}
+
+If it is neither a fuel receipt nor an odometer display, return ONLY:
+{
+  "imageType": "unknown",
+  "reason": "brief description of what the image actually shows"
+}
+
+Rules:
+- receipt: printed fuel receipt or invoice with price, litres, and total cost
+- odometer: dashboard display showing total vehicle mileage/kilometres
+- unknown: anything else (photos of cars, scenery, documents unrelated to fuel, etc.)
+- grade: map REG/REGULAR→Regular 87, PLUS/MID→Plus 89, PREM/PREMIUM/SUPER/91/93→Premium 91 or Premium 93
+- if odometer shows miles, convert to km by multiplying by 1.60934 and round to nearest whole number`
+
 // ── Handler ──────────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
@@ -81,10 +118,14 @@ Deno.serve(async (req: Request) => {
       })
     }
 
-    const isOdometer = type === 'odometer'
-    const system     = isOdometer ? ODO_SYSTEM     : RECEIPT_SYSTEM
-    const prompt     = isOdometer ? ODO_PROMPT     : RECEIPT_PROMPT
-    const maxTokens  = isOdometer ? 256             : 2048
+    let system: string, prompt: string, maxTokens: number
+    if (type === 'odometer') {
+      system = ODO_SYSTEM; prompt = ODO_PROMPT; maxTokens = 256
+    } else if (type === 'auto') {
+      system = AUTO_SYSTEM; prompt = AUTO_PROMPT; maxTokens = 512
+    } else {
+      system = RECEIPT_SYSTEM; prompt = RECEIPT_PROMPT; maxTokens = 2048
+    }
 
     const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
