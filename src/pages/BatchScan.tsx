@@ -92,7 +92,7 @@ function resizeToJpeg(file: File, maxDim = 1600): Promise<{ data: string; mediaT
       URL.revokeObjectURL(url)
       resolve({ data: canvas.toDataURL('image/jpeg', 0.92).split(',')[1], mediaType: 'image/jpeg' })
     }
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Failed to load image')) }
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Cannot decode image — use JPEG, PNG, or WEBP (not HEIC)')) }
     img.src = url
   })
 }
@@ -236,13 +236,27 @@ function StatusPill({ item }: { item: BatchItem }) {
 }
 
 function Thumb({ item, maxH = 120 }: { item: BatchItem; maxH?: number }) {
+  const [imgErr, setImgErr] = useState(false)
   return (
     <div style={{ position: 'relative', flex: '1 1 0', minWidth: 80 }}>
-      <img
-        src={item.previewUrl}
-        alt=""
-        style={{ width: '100%', height: maxH, objectFit: 'cover', borderRadius: 6, display: 'block', background: 'var(--bg3)' }}
-      />
+      {imgErr ? (
+        <div style={{
+          width: '100%', height: maxH, background: 'var(--bg3)', borderRadius: 6,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
+        }}>
+          <span style={{ fontSize: '1.25rem' }}>🚫</span>
+          <span style={{ fontSize: '0.55rem', color: 'var(--sub)', textAlign: 'center', padding: '0 4px' }}>
+            Cannot preview — use JPEG/PNG
+          </span>
+        </div>
+      ) : (
+        <img
+          src={item.previewUrl}
+          alt=""
+          onError={() => setImgErr(true)}
+          style={{ width: '100%', height: maxH, objectFit: 'cover', borderRadius: 6, display: 'block', background: 'var(--bg3)' }}
+        />
+      )}
       <div style={{ position: 'absolute', bottom: 4, left: 4 }}>
         <StatusPill item={item} />
       </div>
@@ -261,6 +275,7 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
   const [items,         setItems]         = useState<BatchItem[]>([])
   const [pairs,         setPairs]         = useState<BatchPair[]>([])
   const [phase,         setPhase]         = useState<'upload' | 'scanning' | 'review' | 'saving'>('upload')
+  const [scanDone,      setScanDone]      = useState(false)
   const [existingDates, setExistingDates] = useState<Set<string>>(new Set())
   const [dragOver,      setDragOver]      = useState(false)
   const [saveError,     setSaveError]     = useState<string | null>(null)
@@ -352,6 +367,11 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
       dispatch()
     })
 
+    setScanDone(true)
+    // Don't auto-advance — let user review errors on thumbnails before proceeding
+  }
+
+  function proceedToReview() {
     const built = buildPairs(itemsRef.current, existingDates)
     setPairs(built)
     setPhase('review')
@@ -584,9 +604,45 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
               ))}
             </div>
           </div>
-          <div style={{ color: 'var(--sub)', fontSize: '0.78rem' }}>
-            Processing {CONCURRENCY} at a time. Failed scans retry once automatically.
-          </div>
+          {!scanDone && (
+            <div style={{ color: 'var(--sub)', fontSize: '0.78rem' }}>
+              Processing {CONCURRENCY} at a time. Failed scans retry once automatically.
+            </div>
+          )}
+
+          {/* Scan complete summary — stays visible until user advances */}
+          {scanDone && (() => {
+            const errored = items.filter(i => i.status === 'error')
+            const succeeded = items.filter(i => i.status === 'done')
+            const uniqueErrors = [...new Set(errored.map(i => i.error ?? 'Unknown error'))]
+            return (
+              <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>
+                  Scan complete — {succeeded.length} of {items.length} succeeded
+                </div>
+                {errored.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    {uniqueErrors.map((msg, i) => (
+                      <div key={i} style={{ fontSize: '0.78rem', color: '#ef4444', display: 'flex', gap: '0.4rem' }}>
+                        <span>✗</span>
+                        <span>{errored.filter(e => e.error === msg).length}× {msg}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button
+                  onClick={proceedToReview}
+                  style={{
+                    alignSelf: 'flex-start', background: 'var(--amber)', color: '#000',
+                    border: 'none', borderRadius: 6, padding: '8px 20px',
+                    cursor: 'pointer', fontWeight: 700, fontSize: '0.875rem', fontFamily: 'Barlow, sans-serif',
+                  }}
+                >
+                  View Results →
+                </button>
+              </div>
+            )
+          })()}
         </div>
       )}
 
