@@ -85,10 +85,13 @@ function isHeicFile(file: File) {
 // heic2any compiles libheif to WASM with a shared heap — concurrent calls cause abort(17) crashes.
 // All conversions are chained through this lock so only one runs at a time.
 let heicLock = Promise.resolve<void>(undefined)
-// Callbacks registered by the component to track conversion progress
-const heicProgressListeners: Array<(delta: number) => void> = []
+
+// Per-photo progress events: { queued: +1 when enqueued, done: +1 when finished }
+type HeicEvent = { queued: 1 } | { done: 1 }
+const heicListeners: Array<(e: HeicEvent) => void> = []
 
 async function convertHeicToJpeg(file: File): Promise<Blob> {
+  heicListeners.forEach(fn => fn({ queued: 1 }))
   const convert = heicLock.then(async () => {
     const { default: heic2any } = await import('heic2any')
     const timeout = new Promise<never>((_, reject) =>
@@ -100,10 +103,9 @@ async function convertHeicToJpeg(file: File): Promise<Blob> {
     ])
     return Array.isArray(converted) ? converted[0] : (converted as Blob)
   }).finally(() => {
-    heicProgressListeners.forEach(fn => fn(-1))
+    heicListeners.forEach(fn => fn({ done: 1 }))
   })
   heicLock = convert.then(() => {}, () => {})  // advance lock regardless of success/failure
-  heicProgressListeners.forEach(fn => fn(+1))
   return convert
 }
 
@@ -322,7 +324,7 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
   const [dragOver,      setDragOver]      = useState(false)
   const [saveError,     setSaveError]     = useState<string | null>(null)
   const [ingesting,     setIngesting]     = useState(0)   // files still being converted/prepared
-  const [heicConverting, setHeicConverting] = useState(0) // HEIC conversions currently in the queue
+  const [heicQueue,     setHeicQueue]     = useState({ total: 0, done: 0 })
 
   const itemsRef   = useRef<BatchItem[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -333,11 +335,13 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
       .then(({ data }) => { if (data) setExistingDates(new Set(data.map(e => e.date))) })
   }, [vehicleId])
 
-  // Track HEIC conversion queue depth for progress display
+  // Track HEIC conversion progress for the progress bar
   useEffect(() => {
-    const listener = (delta: number) => setHeicConverting(v => Math.max(0, v + delta))
-    heicProgressListeners.push(listener)
-    return () => { const i = heicProgressListeners.indexOf(listener); if (i >= 0) heicProgressListeners.splice(i, 1) }
+    const listener = (e: HeicEvent) => setHeicQueue(q =>
+      'queued' in e ? { total: q.total + 1, done: q.done } : { total: q.total, done: q.done + 1 }
+    )
+    heicListeners.push(listener)
+    return () => { const i = heicListeners.indexOf(listener); if (i >= 0) heicListeners.splice(i, 1) }
   }, [])
 
   // ── Item state helper ──────────────────────────────────────────────────────
@@ -541,8 +545,8 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
             <span style={{ fontSize: '2.5rem', lineHeight: 1 }}>📦</span>
             <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>
               {ingesting > 0
-                ? heicConverting > 0
-                  ? `Converting ${heicConverting} HEIC photo${heicConverting !== 1 ? 's' : ''}…`
+                ? heicQueue.total > 0 && heicQueue.done < heicQueue.total
+                  ? `Converting HEIC ${heicQueue.done} / ${heicQueue.total}`
                   : `Preparing ${ingesting} photo${ingesting !== 1 ? 's' : ''}…`
                 : items.length > 0
                   ? `${items.length} photo${items.length !== 1 ? 's' : ''} ready`
@@ -552,20 +556,33 @@ export default function BatchScan({ vehicleId, onSaved }: Props) {
               JPEG, PNG, WEBP, HEIC · Any number · Any order<br />
               Receipt + odometer pairs are matched by photo date
             </div>
-            {heicConverting > 0 && (
-              <div style={{ fontSize: '0.7rem', color: 'var(--sub)', textAlign: 'center' }}>
-                HEIC photos convert one at a time — this may take a moment
-              </div>
+            {ingesting > 0 && heicQueue.total > 0 && heicQueue.done < heicQueue.total && (
+              <>
+                <div style={{ width: '100%', maxWidth: 220 }}>
+                  <div style={{
+                    width: '100%', height: 6,
+                    background: 'var(--border)', borderRadius: 3, overflow: 'hidden',
+                  }}>
+                    <div style={{
+                      height: '100%', background: 'var(--amber)', borderRadius: 3,
+                      width: `${Math.round((heicQueue.done / heicQueue.total) * 100)}%`,
+                      transition: 'width 0.4s ease',
+                    }} />
+                  </div>
+                </div>
+                <div style={{ fontSize: '0.65rem', color: 'var(--sub)' }}>
+                  processed one at a time — may take a moment
+                </div>
+              </>
             )}
-            {ingesting > 0 && (
+            {ingesting > 0 && heicQueue.total === 0 && (
               <div style={{
-                width: '100%', maxWidth: 200, height: 4,
-                background: 'var(--border)', borderRadius: 2, overflow: 'hidden',
+                width: '100%', maxWidth: 220, height: 6,
+                background: 'var(--border)', borderRadius: 3, overflow: 'hidden',
               }}>
                 <div style={{
-                  height: '100%', background: 'var(--amber)', borderRadius: 2,
-                  animation: 'pulse 1s ease-in-out infinite',
-                  width: `${Math.round((1 - ingesting / (items.length + ingesting)) * 100)}%`,
+                  height: '100%', background: 'var(--amber)', borderRadius: 3,
+                  width: `${Math.round((items.length / (items.length + ingesting)) * 100)}%`,
                   transition: 'width 0.3s',
                 }} />
               </div>

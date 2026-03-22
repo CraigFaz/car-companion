@@ -23,6 +23,14 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 const CHANGELOG = [
   {
+    version: 'v2.8',
+    date: '2026-03-22',
+    notes: [
+      'Batch scan: HEIC progress bar now steps forward as each photo finishes converting — real progress, not animated filler',
+      'Drop zone shows "Converting HEIC X / Y" count tied to actual conversion completions',
+    ],
+  },
+  {
     version: 'v2.7',
     date: '2026-03-22',
     notes: [
